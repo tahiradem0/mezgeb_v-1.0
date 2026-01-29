@@ -4,7 +4,7 @@
 
 const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:5000/api'
-    : 'https://mezgeb-backend.onrender.com/api'; // Replace with actual Render URL after deployment
+    : 'https://mezgeb-v-1-0.onrender.com/api';
 
 const api = {
     async request(endpoint, options = {}) {
