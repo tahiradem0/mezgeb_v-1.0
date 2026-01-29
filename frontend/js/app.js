@@ -910,9 +910,14 @@ async function renderSettings() {
         if (user.profileImage) {
             profileImg.src = user.profileImage;
         } else {
-            // Generate initials avatar
             const initials = utils.getInitials(user.username);
             profileImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=333&color=fff&size=100&bold=true`;
+        }
+
+        // Update budget limit in UI
+        const budgetLimitInput = utils.$('#budget-limit');
+        if (budgetLimitInput && user.settings?.budgetLimit) {
+            budgetLimitInput.value = user.settings.budgetLimit;
         }
 
         // Update toggles
@@ -1055,12 +1060,12 @@ function initModals() {
 }
 
 function openEditExpense(expense) {
-    appState.selectedExpenseId = expense.id;
+    appState.selectedExpenseId = expense._id || expense.id;
 
-    utils.$('#edit-expense-id').value = expense.id;
+    utils.$('#edit-expense-id').value = appState.selectedExpenseId;
     utils.$('#edit-amount').value = expense.amount;
     utils.$('#edit-reason').value = expense.reason;
-    utils.$('#edit-date').value = expense.date;
+    utils.$('#edit-date').value = utils.formatDateForInput(expense.date);
 
     utils.showModal('edit-expense-modal');
 }
@@ -1096,6 +1101,11 @@ async function handleEditExpense() {
     const amount = parseFloat(utils.$('#edit-amount').value);
     const reason = utils.$('#edit-reason').value;
     const date = utils.$('#edit-date').value;
+
+    if (!id || isNaN(amount) || !reason || !date) {
+        utils.showToast('Please fill all fields', 'error');
+        return;
+    }
 
     try {
         utils.showToast('Updating expense...', 'info');
@@ -2100,13 +2110,34 @@ function initApp() {
             document.documentElement.dataset.fontSize = savedUser.settings.fontSize || 'medium';
         }
         showPage('home');
+        if (navigator.onLine && api.syncPendingExpenses) {
+            api.syncPendingExpenses().then(() => renderHome());
+        }
     }
 
     // Network status listeners
     utils.addNetworkListeners(
-        () => utils.showToast('You are back online!', 'success'),
+        () => {
+            utils.showToast('You are back online!', 'success');
+            if (api.syncPendingExpenses) api.syncPendingExpenses().then(() => {
+                if (appState.currentPage === 'home') renderHome();
+            });
+        },
         () => utils.showToast('You are offline. Changes will sync when online.', 'warning')
     );
+
+    // Service Worker messages
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', async (event) => {
+            if (event.data.type === 'TRIGGER_SYNC') {
+                console.log('Background sync triggered from Service Worker');
+                if (api.syncPendingExpenses) {
+                    await api.syncPendingExpenses();
+                    if (appState.currentPage === 'home') renderHome();
+                }
+            }
+        });
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

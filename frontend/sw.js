@@ -179,22 +179,15 @@ self.addEventListener('sync', (event) => {
 
 // Sync offline expenses
 async function syncExpenses() {
-    try {
-        // Get pending expenses from IndexedDB
-        // In production, this would read from IndexedDB and POST to server
-        console.log('[Service Worker] Syncing offline expenses...');
+    console.log('[Service Worker] Syncing offline expenses...');
 
-        // Notify clients that sync is complete
-        const clients = await self.clients.matchAll();
-        clients.forEach((client) => {
-            client.postMessage({
-                type: 'SYNC_COMPLETE',
-                message: 'Your expenses have been synced!'
-            });
-        });
-    } catch (error) {
-        console.error('[Service Worker] Sync failed:', error);
-        throw error; // Will retry later
+    // In a service worker, we can't easily import api.js if it's not a module
+    // But we can notify the client to perform the sync, or use importScripts if it was structured for it.
+    // For simplicity, we'll notify the open client to trigger the sync.
+
+    const clients = await self.clients.matchAll({ type: 'window' });
+    for (const client of clients) {
+        client.postMessage({ type: 'TRIGGER_SYNC' });
     }
 }
 
