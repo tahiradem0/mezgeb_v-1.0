@@ -231,15 +231,27 @@ async function verifyBiometric() {
         throw new Error("No platform authenticator available");
     }
 
-    // For a real implementation, we would use navigator.credentials.get() with proper challenge
-    // For now, we simulate the biometric prompt by checking device capability
-    return new Promise((resolve, reject) => {
-        // This simulates biometric verification success
-        // In production, implement full WebAuthn flow with server-side challenge
-        setTimeout(() => {
-            resolve(true);
-        }, 500);
-    });
+    try {
+        // Use WebAuthn to trigger the actual biometric prompt (fingerprint/face ID)
+        const challenge = new Uint8Array(32);
+        window.crypto.getRandomValues(challenge);
+
+        // This call will show the system's "Verify it's you" dialog
+        await navigator.credentials.get({
+            publicKey: {
+                challenge: challenge,
+                timeout: 60000,
+                userVerification: 'required',
+            }
+        });
+
+        // If the promise resolves, user successfully verified
+        return true;
+    } catch (e) {
+        console.error("Biometric verification failed:", e);
+        // If user actively cancelled, or failed verification
+        throw new Error("Biometric verification failed");
+    }
 }
 
 async function handleRegister(data) {
@@ -1248,22 +1260,49 @@ function initModals() {
 function openEditExpense(expense) {
     if (!expense) return;
 
-    // Detailed logging to debug the "undefined _id" issues
-    console.log('Opening edit for expense:', expense);
-
     const id = expense._id || expense.id;
     if (!id) {
-        console.error('Expense object is missing both _id and id properties');
         utils.showToast('Could not identify expense ID', 'error');
         return;
     }
 
     appState.selectedExpenseId = id;
 
+    // Populate fields
     utils.$('#edit-expense-id').value = id;
     utils.$('#edit-amount').value = expense.amount || 0;
     utils.$('#edit-reason').value = expense.reason || '';
     utils.$('#edit-date').value = utils.formatDateForInput(expense.date || new Date());
+
+    // Populate Category Selector
+    const catContainer = utils.$('#edit-category-selector');
+    if (catContainer && window.appData.categories) {
+        catContainer.innerHTML = '';
+        const currentCatId = expense.categoryId?._id || expense.categoryId;
+
+        appState.selectedEditCategory = currentCatId; // Set initial value
+
+        window.appData.categories.forEach(cat => {
+            const isSelected = cat._id === currentCatId;
+            const el = utils.createElement('div', {
+                className: 'category-item-edit',
+                innerHTML: `<span style="font-size: 24px;">${cat.icon}</span><div style="font-size: 10px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cat.name}</div>`,
+                style: `cursor: pointer; padding: 8px; border-radius: 8px; background: ${isSelected ? 'var(--color-primary-light)' : 'var(--color-background)'}; text-align: center; border: 2px solid ${isSelected ? 'var(--color-primary)' : 'transparent'}; transition: all 0.2s; aspect-ratio: 1; display: flex; flex-direction: column; justify-content: center; align-items: center;`,
+                onClick: (e) => {
+                    // Deselect others
+                    catContainer.querySelectorAll('.category-item-edit').forEach(c => {
+                        c.style.borderColor = 'transparent';
+                        c.style.background = 'var(--color-background)';
+                    });
+                    // Select this
+                    e.currentTarget.style.borderColor = 'var(--color-primary)';
+                    e.currentTarget.style.background = 'var(--color-primary-light)';
+                    appState.selectedEditCategory = cat._id;
+                }
+            });
+            catContainer.appendChild(el);
+        });
+    }
 
     utils.showModal('edit-expense-modal');
 }
@@ -1299,6 +1338,7 @@ async function handleEditExpense() {
     const amount = parseFloat(utils.$('#edit-amount').value);
     const reason = utils.$('#edit-reason').value;
     const date = utils.$('#edit-date').value;
+    const categoryId = appState.selectedEditCategory;
 
     if (!id || isNaN(amount) || !reason || !date) {
         utils.showToast('Please fill all fields', 'error');
@@ -1310,6 +1350,7 @@ async function handleEditExpense() {
         await api.updateExpense(id, {
             amount,
             reason,
+            categoryId, // Include updated category
             date: new Date(date).toISOString(),
             dateEthiopian: utils.toEthiopianDate(date)
         });
@@ -1797,12 +1838,8 @@ function initNotifications() {
     }
 
     // Notification bell click - will be initialized when header is created
-    if (notificationBell) {
-        notificationBell.addEventListener('click', () => {
-            renderNotifications();
-            utils.showModal('notifications-modal');
-        });
-    }
+    // Duplicate notification listener removed (now handled in initHome)
+    // if (notificationBell) { ... }
 }
 
 function renderNotifications() {
@@ -1888,31 +1925,31 @@ function addNotification(type, title, text) {
 
 // Trigger system push notification
 async function triggerPushNotification(title, body) {
-    // Check if notifications are supported and permitted
-    if (!('Notification' in window)) {
-        console.log('Notifications not supported');
-        return;
-    }
+    // Check if notifications are supported
+    if (!('Notification' in window)) return;
 
-    // Request permission if not already granted
-    let permission = Notification.permission;
-    if (permission === 'default') {
-        permission = await Notification.requestPermission();
-    }
-
-    if (permission === 'granted') {
-        // Show notification
-        const notification = new Notification(title, {
+    // Check permission
+    if (Notification.permission === 'granted') {
+        const options = {
             body: body,
             icon: '/icons/icon-192.png',
             badge: '/icons/badge-72.png',
             tag: 'budget-alert',
             renotify: true,
             requireInteraction: false
-        });
+        };
 
-        // Close after 5 seconds
-        setTimeout(() => notification.close(), 5000);
+        // Use Service Worker if available (better for PWA/Mobile)
+        if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                reg.showNotification(title, options);
+            } catch (e) {
+                new Notification(title, options);
+            }
+        } else {
+            new Notification(title, options);
+        }
     }
 }
 
@@ -2616,3 +2653,57 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+/* ===================================
+   PWA Install Promotion
+   =================================== */
+let deferredPrompt;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent the mini-infobar from appearing on mobile
+    e.preventDefault();
+    // Stash the event so it can be triggered later.
+    deferredPrompt = e;
+    // Show install button
+    showInstallButton();
+});
+
+function showInstallButton() {
+    // Try to find a place in Settings
+    // We check if utility is available, otherwise waiting for DOM might be needed
+    // But since this event usually fires slightly after load, DOM should be ready or initApp renders it
+
+    // We target the Settings page logout button container
+    // We perform a check to ensure we don't add duplicate buttons
+    if (document.getElementById('pwa-install-btn')) return;
+
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn && deferredPrompt) {
+        const installBtn = document.createElement('button');
+        installBtn.id = 'pwa-install-btn';
+        installBtn.className = 'btn btn-primary btn-full';
+        installBtn.style.marginBottom = '16px';
+        installBtn.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Distinct Green
+        installBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;vertical-align:middle;">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Install App
+        `;
+
+        installBtn.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            console.log(`User response to the install prompt: ${outcome}`);
+            if (outcome === 'accepted') {
+                deferredPrompt = null;
+                installBtn.remove();
+            }
+        });
+
+        logoutBtn.parentNode.insertBefore(installBtn, logoutBtn);
+    }
+}
