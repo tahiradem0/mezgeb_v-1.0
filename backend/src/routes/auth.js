@@ -16,18 +16,7 @@ router.post('/register', async (req, res) => {
         });
         await user.save();
 
-        // Create default categories
-        const Category = require('../models/Category');
-        const defaultCategories = [
-            { name: 'House', icon: '🏠', color: '#8BC34A' },
-            { name: 'Shop', icon: '🏪', color: '#FF9800' },
-            { name: 'Transport', icon: '🚗', color: '#2196F3' },
-            { name: 'Food', icon: '🍔', color: '#E91E63' }
-        ];
-
-        for (const cat of defaultCategories) {
-            await new Category({ ...cat, userId: user._id }).save();
-        }
+        // No default categories - user creates their own
 
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
         res.status(201).json({ user, token });

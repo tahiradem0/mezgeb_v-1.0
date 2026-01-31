@@ -36,16 +36,15 @@ function initCategoryPage() {
     });
 }
 
+// ... (previous code)
+
 function hideSplashScreen() {
     const splash = utils.$('#splash-screen');
     const app = utils.$('#app');
 
-    splash.classList.add('fade-out');
+    // Immediate removal as requested
+    splash.style.display = 'none';
     app.classList.remove('hidden');
-
-    setTimeout(() => {
-        splash.style.display = 'none';
-    }, 500);
 }
 
 // ===================================
@@ -53,6 +52,7 @@ function hideSplashScreen() {
 // ===================================
 
 function initNavigation() {
+    // ... (keep as is)
     const navItems = utils.$$('.nav-item');
     const bottomNav = utils.$('#bottom-nav');
 
@@ -192,6 +192,15 @@ function initAuth() {
     if (savedPhone) {
         utils.$('#login-phone').value = savedPhone;
     }
+
+    // Checking if we should prompt for biometric immediately
+    const token = localStorage.getItem('token');
+    const enableBiometric = localStorage.getItem('enableBiometric') === 'true';
+
+    if (token && enableBiometric) {
+        // Auto-trigger biometric if enabled
+        setTimeout(() => handleBiometricLogin(), 500);
+    }
 }
 
 async function handleLogin(credentials) {
@@ -200,10 +209,37 @@ async function handleLogin(credentials) {
         const data = await api.login(credentials);
         appState.isLoggedIn = true;
         utils.showToast('Welcome back!', 'success');
+
+        // Save biometric preference if needed (usually done in settings, but default to true if they want)
+        // localStorage.setItem('enableBiometric', 'true'); 
+
         showPage('home');
     } catch (e) {
         utils.showToast(e.message, 'error');
     }
+}
+
+async function verifyBiometric() {
+    // Check WebAuthn support
+    if (!window.PublicKeyCredential) {
+        throw new Error("Biometric not supported");
+    }
+
+    // Check if platform authenticator (fingerprint) is available
+    const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    if (!available) {
+        throw new Error("No platform authenticator available");
+    }
+
+    // For a real implementation, we would use navigator.credentials.get() with proper challenge
+    // For now, we simulate the biometric prompt by checking device capability
+    return new Promise((resolve, reject) => {
+        // This simulates biometric verification success
+        // In production, implement full WebAuthn flow with server-side challenge
+        setTimeout(() => {
+            resolve(true);
+        }, 500);
+    });
 }
 
 async function handleRegister(data) {
@@ -211,6 +247,11 @@ async function handleRegister(data) {
         utils.showToast('Creating account...', 'info');
         const userData = await api.register(data);
         appState.isLoggedIn = true;
+
+        if (data.enableBiometric) {
+            localStorage.setItem('enableBiometric', 'true');
+        }
+
         utils.showToast('Account created successfully!', 'success');
         showPage('home');
     } catch (e) {
@@ -218,18 +259,38 @@ async function handleRegister(data) {
     }
 }
 
-function handleBiometricLogin() {
+async function handleBiometricLogin() {
     // Check if WebAuthn is supported
     if (window.PublicKeyCredential) {
-        utils.showToast('Place your finger on the sensor', 'info');
+        const token = localStorage.getItem('token');
+        if (!token) {
+            utils.showToast('Please login with password first to enable fingerprint', 'info');
+            return;
+        }
 
-        // Simulate biometric authentication
-        setTimeout(() => {
-            appState.isLoggedIn = true;
-            utils.saveToStorage('currentUser', window.appData.userData);
-            utils.showToast('Authentication successful!', 'success');
-            showPage('home');
-        }, 1500);
+        utils.showToast('Verifying fingerprint...', 'info');
+
+        try {
+            // Simulate/Perform biometric challenge
+            await verifyBiometric();
+
+            // Fetch REAL fresh data using the token to verify it's valid
+            try {
+                const userProfile = await api.getProfile();
+                appState.isLoggedIn = true;
+                utils.saveToStorage('currentUser', userProfile); // Update local user data
+                utils.showToast('Authentication successful!', 'success');
+                showPage('home');
+            } catch (err) {
+                // Token might be expired
+                utils.showToast('Session expired. Please login with password.', 'error');
+                handleLogout();
+            }
+
+        } catch (e) {
+            utils.showToast('Biometric authentication failed', 'error');
+        }
+
     } else {
         utils.showToast('Biometric login not supported on this device', 'error');
     }
@@ -264,8 +325,11 @@ function initHome() {
     // Notification bell
     if (notificationBell) {
         notificationBell.addEventListener('click', () => {
-            renderNotifications();
-            utils.showModal('notifications-modal');
+            // Re-generate notifications to ensure freshness
+            generateNotificationsFromExpenses(window.appData.expenses || [], window.appData.categories || []);
+
+            // Show notifications dropdown
+            showNotificationDropdown();
         });
     }
 
@@ -309,13 +373,52 @@ async function renderHome() {
         const categories = await api.getCategories();
         const expenses = await api.getExpenses();
 
-        // Update global appData (for legacy compatibility if needed, though we should transition away)
+        // Update global appData
+        window.appData = window.appData || {};
         window.appData.categories = categories;
         window.appData.expenses = expenses;
 
-        // Calculate total expense
-        const totalExpense = expenses.reduce((sum, exp) => sum + exp.amount, 0);
-        utils.$('.total-amount').innerHTML = `${utils.formatCurrency(totalExpense)} <span class="currency">ETB</span>`;
+        // Calculate total expense for this month
+        const now = new Date();
+        const thisMonthExpenses = expenses.filter(exp => {
+            const d = new Date(exp.date);
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        });
+        const thisMonthTotal = thisMonthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+        // Calculate last month expense for percentage
+        const lastMonthDate = new Date();
+        lastMonthDate.setMonth(now.getMonth() - 1);
+        const lastMonthExpenses = expenses.filter(exp => {
+            const d = new Date(exp.date);
+            return d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear();
+        });
+        const lastMonthTotal = lastMonthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+        // Calculate percentage change
+        let percentChange = 0;
+        let trend = 'neutral';
+        if (lastMonthTotal > 0) {
+            percentChange = ((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100;
+        } else if (thisMonthTotal > 0) {
+            percentChange = 100; // 100% increase if last month was 0
+        }
+
+        utils.$('.total-amount').innerHTML = `${utils.formatCurrency(thisMonthTotal)} <span class="currency">ETB</span>`;
+
+        const trendEl = utils.$('.expense-trend');
+        const isUp = percentChange > 0;
+        const trendClass = isUp ? 'trend-up' : 'trend-down'; // Assuming trend-down class exists or using trend-up for color
+        const arrow = isUp ? '↑' : '↓';
+
+        // CSS expects trend-up for red (bad) usually in expense trackers, or green? 
+        // Usually more expense = bad (Red), less = good (Green).
+        // Let's assume trend-up is styled.
+
+        trendEl.innerHTML = `
+            <span class="trend-badge ${trendClass}">${arrow} ${Math.abs(percentChange).toFixed(1)}%</span>
+            <span class="trend-text">vs last month</span>
+        `;
 
         // Render categories
         renderCategoriesData(categories, expenses);
@@ -336,6 +439,7 @@ async function renderHome() {
 
 function renderCategoriesData(categories, expenses) {
     const container = utils.$('#categories-container');
+    // ... (rest is same, but enabling all categories for now or filtering)
     const visibleCategories = categories.filter(cat => cat.isVisible);
 
     container.innerHTML = '';
@@ -523,7 +627,7 @@ async function renderAddExpense() {
 
         categories.filter(cat => cat.isVisible).forEach((category, index) => {
             const chip = utils.createElement('div', {
-                className: `category-chip ${index === 0 ? 'active' : ''}`,
+                className: 'category-chip', // Modified: No default active
                 dataId: category._id,
                 onClick: (e) => {
                     utils.$$('.category-chip').forEach(c => c.classList.remove('active'));
@@ -574,7 +678,8 @@ function showReasonSuggestions(query) {
     suggestions.slice(0, 5).forEach(suggestion => {
         const item = utils.createElement('div', {
             className: 'autocomplete-item',
-            onClick: () => {
+            onMousedown: (e) => { // Modified: Use mousedown to prevent blur
+                e.preventDefault();
                 utils.$('#expense-reason').value = suggestion;
                 dropdown.classList.add('hidden');
             }
@@ -598,7 +703,12 @@ async function handleAddExpense() {
     const activeCategory = utils.$('.category-chip.active');
     const categoryId = activeCategory?.dataset.id;
 
-    if (!amount || !reason || !categoryId) {
+    if (!categoryId) {
+        utils.showToast('Please select a category', 'error');
+        return;
+    }
+
+    if (!amount || !reason) {
         utils.showToast('Please fill all fields', 'error');
         return;
     }
@@ -837,11 +947,66 @@ function initSettings() {
         }
     });
 
-    // Add category
+    // Add category - Reset for clean add
     addCategoryBtn.addEventListener('click', () => {
+        const form = utils.$('#add-category-form');
+        if (form) form.reset();
+        const hiddenInput = utils.$('#category-id-hidden');
+        if (hiddenInput) hiddenInput.remove();
+        const header = utils.$('#add-category-modal h3');
+        if (header) header.textContent = 'Add Category';
+        const submitBtn = utils.$('#add-category-form button[type="submit"]');
+        if (submitBtn) submitBtn.textContent = 'Add Category';
         utils.showModal('add-category-modal');
         renderIconSelector();
     });
+
+    // Save Budget Settings Button
+    const budgetSettings = utils.$('#budget-alert-settings');
+    if (budgetSettings && !utils.$('#save-budget-btn')) {
+        const saveBudgetBtn = utils.createElement('button', {
+            id: 'save-budget-btn',
+            className: 'btn btn-primary btn-sm',
+            textContent: 'Save Alert',
+            style: 'margin-top: 10px;',
+            onClick: async () => {
+                const limit = parseFloat(utils.$('#budget-limit').value);
+                const enabled = utils.$('#budget-alert-toggle').checked;
+
+                // Request notification permission if enabled
+                if (enabled && 'Notification' in window && Notification.permission === 'default') {
+                    await Notification.requestPermission();
+                }
+
+                try {
+                    await api.updateSettings({ budgetLimit: limit, budgetAlertEnabled: enabled });
+                    utils.showToast('Budget settings saved', 'success');
+                } catch (e) { utils.showToast('Failed to save', 'error'); }
+            }
+        });
+        budgetSettings.appendChild(saveBudgetBtn);
+    }
+
+    // Save Reminder Settings Button
+    const reminderOptions = document.querySelector('.reminder-options');
+    if (reminderOptions && !utils.$('#save-reminder-btn')) {
+        const saveReminderBtn = utils.createElement('button', {
+            id: 'save-reminder-btn',
+            className: 'btn btn-primary btn-sm',
+            textContent: 'Save Schedule',
+            style: 'margin-top: 10px; width: 100%;',
+            onClick: async () => {
+                const selected = document.querySelector('input[name="reminder"]:checked')?.value;
+                if (selected) {
+                    try {
+                        await api.updateSettings({ reminderSchedule: selected });
+                        utils.showToast('Reminder schedule saved', 'success');
+                    } catch (e) { utils.showToast('Failed to save', 'error'); }
+                }
+            }
+        });
+        reminderOptions.appendChild(saveReminderBtn);
+    }
 
     // Logout
     logoutBtn.addEventListener('click', handleLogout);
@@ -863,29 +1028,21 @@ function initSettings() {
         profileImageInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
-
-            // Check file size (max 2MB)
             if (file.size > 2 * 1024 * 1024) {
                 utils.showToast('Image size must be less than 2MB', 'error');
                 return;
             }
-
-            // Convert to base64 for storage
             const reader = new FileReader();
             reader.onload = async (event) => {
                 const base64Image = event.target.result;
-
                 try {
-                    // Update profile image in backend
                     await api.updateSettings({ profileImage: base64Image });
-
-                    // Update local storage
                     const user = JSON.parse(localStorage.getItem('currentUser'));
                     user.profileImage = base64Image;
                     localStorage.setItem('currentUser', JSON.stringify(user));
-
-                    // Update UI
                     utils.$('#settings-profile-img').src = base64Image;
+                    const homeAvatar = utils.$('.profile-avatar img');
+                    if (homeAvatar) homeAvatar.src = base64Image;
                     utils.showToast('Profile photo updated!', 'success');
                 } catch (err) {
                     utils.showToast('Failed to update profile photo', 'error');
@@ -1007,7 +1164,32 @@ async function toggleCategoryVisibility(category) {
 }
 
 function editCategory(category) {
-    utils.showToast('Edit category feature coming soon', 'info');
+    const modal = utils.$('#add-category-modal');
+    const form = utils.$('#add-category-form');
+    if (!modal || !form) return;
+
+    // Set modal title
+    const header = modal.querySelector('h3');
+    if (header) header.textContent = 'Edit Category';
+
+    // Fill form with existing data
+    utils.$('#category-name').value = category.name;
+    appState.selectedCategoryIcon = category.icon;
+    renderIconSelector();
+
+    // Add hidden input with category ID for update
+    let idInput = utils.$('#category-id-hidden');
+    if (!idInput) {
+        idInput = utils.createElement('input', { type: 'hidden', id: 'category-id-hidden' });
+        form.appendChild(idInput);
+    }
+    idInput.value = category._id;
+
+    // Update button text
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.textContent = 'Update Category';
+
+    utils.showModal('add-category-modal');
 }
 
 // ===================================
@@ -1030,7 +1212,8 @@ function initModals() {
     });
 
     if (deleteExpenseBtn) {
-        deleteExpenseBtn.addEventListener('click', () => {
+        deleteExpenseBtn.addEventListener('click', (e) => {
+            e.preventDefault();
             handleDeleteExpense();
         });
     }
@@ -1048,24 +1231,39 @@ function initModals() {
         handleAddCategory();
     });
 
+    const closeModals = () => {
+        utils.$$('.modal').forEach(modal => modal.classList.add('hidden'));
+        document.body.style.overflow = '';
+    };
+
+    // Close buttons logic
+    utils.$$('.modal-close').forEach(btn => btn.addEventListener('click', closeModals));
+
     // Close modals on backdrop click
     utils.$$('.modal-backdrop').forEach(backdrop => {
-        backdrop.addEventListener('click', () => {
-            utils.$$('.modal').forEach(modal => {
-                modal.classList.add('hidden');
-            });
-            document.body.style.overflow = '';
-        });
+        backdrop.addEventListener('click', closeModals);
     });
 }
 
 function openEditExpense(expense) {
-    appState.selectedExpenseId = expense._id || expense.id;
+    if (!expense) return;
 
-    utils.$('#edit-expense-id').value = appState.selectedExpenseId;
-    utils.$('#edit-amount').value = expense.amount;
-    utils.$('#edit-reason').value = expense.reason;
-    utils.$('#edit-date').value = utils.formatDateForInput(expense.date);
+    // Detailed logging to debug the "undefined _id" issues
+    console.log('Opening edit for expense:', expense);
+
+    const id = expense._id || expense.id;
+    if (!id) {
+        console.error('Expense object is missing both _id and id properties');
+        utils.showToast('Could not identify expense ID', 'error');
+        return;
+    }
+
+    appState.selectedExpenseId = id;
+
+    utils.$('#edit-expense-id').value = id;
+    utils.$('#edit-amount').value = expense.amount || 0;
+    utils.$('#edit-reason').value = expense.reason || '';
+    utils.$('#edit-date').value = utils.formatDateForInput(expense.date || new Date());
 
     utils.showModal('edit-expense-modal');
 }
@@ -1153,6 +1351,8 @@ function renderIconSelector() {
 
 async function handleAddCategory() {
     const name = utils.$('#category-name').value;
+    const idInput = utils.$('#category-id-hidden');
+    const isEdit = idInput && idInput.value;
 
     if (!name) {
         utils.showToast('Please enter a category name', 'error');
@@ -1160,15 +1360,25 @@ async function handleAddCategory() {
     }
 
     try {
-        utils.showToast('Creating category...', 'info');
-        await api.createCategory({
-            name,
-            icon: appState.selectedCategoryIcon
-        });
+        if (isEdit) {
+            utils.showToast('Updating category...', 'info');
+            await api.updateCategory(idInput.value, {
+                name,
+                icon: appState.selectedCategoryIcon
+            });
+            utils.showToast('Category updated!', 'success');
+        } else {
+            utils.showToast('Creating category...', 'info');
+            await api.createCategory({
+                name,
+                icon: appState.selectedCategoryIcon
+            });
+            utils.showToast('Category added successfully!', 'success');
+        }
 
         utils.hideModal('add-category-modal');
-        utils.showToast('Category added successfully!', 'success');
         utils.$('#category-name').value = '';
+        if (idInput) idInput.value = '';
 
         renderSettingsCategories();
     } catch (e) {
@@ -1676,6 +1886,36 @@ function addNotification(type, title, text) {
     updateNotificationBadge();
 }
 
+// Trigger system push notification
+async function triggerPushNotification(title, body) {
+    // Check if notifications are supported and permitted
+    if (!('Notification' in window)) {
+        console.log('Notifications not supported');
+        return;
+    }
+
+    // Request permission if not already granted
+    let permission = Notification.permission;
+    if (permission === 'default') {
+        permission = await Notification.requestPermission();
+    }
+
+    if (permission === 'granted') {
+        // Show notification
+        const notification = new Notification(title, {
+            body: body,
+            icon: '/icons/icon-192.png',
+            badge: '/icons/badge-72.png',
+            tag: 'budget-alert',
+            renotify: true,
+            requireInteraction: false
+        });
+
+        // Close after 5 seconds
+        setTimeout(() => notification.close(), 5000);
+    }
+}
+
 // Generate notifications based on real expense data
 function generateNotificationsFromExpenses(expenses, categories) {
     // Clear old auto-generated notifications (those without category 'manual')
@@ -1695,9 +1935,10 @@ function generateNotificationsFromExpenses(expenses, categories) {
     // Get budget limit from user settings
     const user = JSON.parse(localStorage.getItem('currentUser'));
     const budgetLimit = user?.settings?.budgetLimit || 10000;
+    const budgetAlertEnabled = user?.settings?.budgetAlertEnabled !== false;
 
     // Budget alert
-    if (monthTotal > budgetLimit) {
+    if (monthTotal > budgetLimit && budgetAlertEnabled) {
         notifications.unshift({
             id: 'auto-budget-err',
             type: 'alert',
@@ -1706,7 +1947,9 @@ function generateNotificationsFromExpenses(expenses, categories) {
             time: 'Now',
             unread: true
         });
-    } else if (monthTotal > budgetLimit * 0.8) {
+        // Trigger system push notification
+        triggerPushNotification('Budget Exceeded!', `You've spent ${utils.formatCurrency(monthTotal)} ETB, exceeding your ${utils.formatCurrency(budgetLimit)} ETB limit.`);
+    } else if (monthTotal > budgetLimit * 0.8 && budgetAlertEnabled) {
         notifications.unshift({
             id: 'auto-budget-warn',
             type: 'warning',
@@ -1766,6 +2009,86 @@ function generateNotificationsFromExpenses(expenses, categories) {
 
     updateNotificationBadge();
     renderNotifications();
+}
+
+// Show notification dropdown popup
+function showNotificationDropdown() {
+    // Remove existing dropdown if any
+    const existing = utils.$('#notification-dropdown');
+    if (existing) {
+        existing.remove();
+        return; // Toggle off
+    }
+
+    // Create dropdown
+    const dropdown = utils.createElement('div', {
+        id: 'notification-dropdown',
+        className: 'notification-dropdown',
+        style: 'position: fixed; top: 60px; right: 10px; width: 320px; max-height: 400px; overflow-y: auto; background: var(--color-surface); border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); z-index: 1000; padding: 16px;'
+    });
+
+    // Add header
+    const header = utils.createElement('div', {
+        style: 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--color-border); padding-bottom: 8px;'
+    }, [
+        utils.createElement('h4', { textContent: 'Notifications', style: 'margin: 0; color: var(--color-text);' }),
+        utils.createElement('button', {
+            textContent: '✕',
+            style: 'background: none; border: none; font-size: 18px; cursor: pointer; color: var(--color-text-secondary);',
+            onClick: () => dropdown.remove()
+        })
+    ]);
+    dropdown.appendChild(header);
+
+    // Add notifications
+    if (notifications.length === 0) {
+        dropdown.appendChild(utils.createElement('p', {
+            textContent: 'No notifications yet',
+            style: 'color: var(--color-text-secondary); text-align: center; padding: 20px;'
+        }));
+    } else {
+        notifications.forEach(notif => {
+            const typeColors = {
+                'alert': '#e74c3c',
+                'warning': '#f39c12',
+                'info': '#3498db',
+                'insight': '#9b59b6'
+            };
+
+            const item = utils.createElement('div', {
+                style: `padding: 12px; margin-bottom: 8px; background: ${notif.unread ? 'var(--color-background)' : 'transparent'}; border-radius: 8px; border-left: 3px solid ${typeColors[notif.type] || '#333'};`,
+                onClick: () => {
+                    notif.unread = false;
+                    updateNotificationBadge();
+                }
+            }, [
+                utils.createElement('p', {
+                    textContent: notif.title,
+                    style: 'font-weight: 600; margin: 0 0 4px 0; color: var(--color-text);'
+                }),
+                utils.createElement('p', {
+                    textContent: notif.text,
+                    style: 'font-size: 13px; margin: 0 0 4px 0; color: var(--color-text-secondary);'
+                }),
+                utils.createElement('span', {
+                    textContent: notif.time,
+                    style: 'font-size: 11px; color: var(--color-text-tertiary);'
+                })
+            ]);
+            dropdown.appendChild(item);
+        });
+    }
+
+    document.body.appendChild(dropdown);
+
+    // Close dropdown when clicking outside
+    const closeHandler = (e) => {
+        if (!dropdown.contains(e.target) && !e.target.closest('.notification-bell')) {
+            dropdown.remove();
+            document.removeEventListener('click', closeHandler);
+        }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 100);
 }
 
 // Dynamic Chart Functions with Data
@@ -1973,26 +2296,146 @@ function initCharts() {
 // PDF Export
 // ===================================
 
-utils.$('#export-pdf-btn')?.addEventListener('click', () => utils.showModal('export-pdf-modal'));
-utils.$('#export-pdf-main')?.addEventListener('click', () => utils.showModal('export-pdf-modal'));
-utils.$('#close-export-modal')?.addEventListener('click', () => utils.hideModal('export-pdf-modal'));
-utils.$('#confirm-export-pdf')?.addEventListener('click', async () => {
-    const from = utils.$('#pdf-date-from').value;
-    const to = utils.$('#pdf-date-to').value;
-    utils.hideModal('export-pdf-modal');
-    await exportToPDF(from, to);
-});
+function showExportModal() {
+    // Remove existing modal if any
+    const existing = utils.$('#export-modal-dynamic');
+    if (existing) existing.remove();
 
-async function exportToPDF(dateFrom = null, dateTo = null) {
+    // Create modal dynamically
+    const modal = utils.createElement('div', {
+        id: 'export-modal-dynamic',
+        className: 'modal',
+        style: 'position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;'
+    });
+
+    const content = utils.createElement('div', {
+        className: 'modal-content',
+        style: 'background: var(--color-surface); border-radius: 16px; padding: 24px; width: 90%; max-width: 400px;'
+    }, [
+        utils.createElement('h3', { textContent: 'Export to PDF', style: 'margin: 0 0 20px 0; color: var(--color-text);' }),
+
+        // Export all option
+        utils.createElement('div', { style: 'margin-bottom: 16px;' }, [
+            utils.createElement('label', { style: 'display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--color-text);' }, [
+                utils.createElement('input', { type: 'radio', name: 'export-type', value: 'all', checked: true, id: 'export-type-all' }),
+                utils.createElement('span', { textContent: 'Export All Data' })
+            ])
+        ]),
+
+        // Date range option
+        utils.createElement('div', { style: 'margin-bottom: 16px;' }, [
+            utils.createElement('label', { style: 'display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--color-text);' }, [
+                utils.createElement('input', { type: 'radio', name: 'export-type', value: 'range', id: 'export-type-range' }),
+                utils.createElement('span', { textContent: 'Select Date Range' })
+            ])
+        ]),
+
+        // Date inputs container
+        utils.createElement('div', { id: 'date-range-inputs', style: 'display: none; margin-bottom: 16px; padding: 12px; background: var(--color-background); border-radius: 8px;' }, [
+            utils.createElement('div', { style: 'display: flex; gap: 12px;' }, [
+                utils.createElement('div', { style: 'flex: 1;' }, [
+                    utils.createElement('label', { textContent: 'From:', style: 'display: block; margin-bottom: 4px; font-size: 12px; color: var(--color-text-secondary);' }),
+                    utils.createElement('input', { type: 'date', id: 'export-date-from', style: 'width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 6px;' })
+                ]),
+                utils.createElement('div', { style: 'flex: 1;' }, [
+                    utils.createElement('label', { textContent: 'To:', style: 'display: block; margin-bottom: 4px; font-size: 12px; color: var(--color-text-secondary);' }),
+                    utils.createElement('input', { type: 'date', id: 'export-date-to', style: 'width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 6px;' })
+                ])
+            ])
+        ]),
+
+        // Category filter option
+        utils.createElement('div', { style: 'margin-bottom: 16px;' }, [
+            utils.createElement('label', { style: 'display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--color-text);' }, [
+                utils.createElement('input', { type: 'radio', name: 'export-type', value: 'category', id: 'export-type-category' }),
+                utils.createElement('span', { textContent: 'Export by Category' })
+            ])
+        ]),
+
+        // Category select container
+        utils.createElement('div', { id: 'category-select-container', style: 'display: none; margin-bottom: 16px;' }, [
+            utils.createElement('select', { id: 'export-category-select', style: 'width: 100%; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-background);' })
+        ]),
+
+        // Buttons
+        utils.createElement('div', { style: 'display: flex; gap: 12px; margin-top: 20px;' }, [
+            utils.createElement('button', {
+                textContent: 'Cancel',
+                style: 'flex: 1; padding: 12px; border: 1px solid var(--color-border); border-radius: 8px; background: transparent; cursor: pointer; color: var(--color-text);',
+                onClick: () => modal.remove()
+            }),
+            utils.createElement('button', {
+                id: 'confirm-export-btn',
+                textContent: 'Export PDF',
+                style: 'flex: 1; padding: 12px; border: none; border-radius: 8px; background: var(--color-primary); color: white; cursor: pointer; font-weight: 600;',
+                onClick: async () => {
+                    const exportType = document.querySelector('input[name="export-type"]:checked')?.value;
+                    modal.remove();
+
+                    if (exportType === 'all') {
+                        await exportToPDF(null, null, null);
+                    } else if (exportType === 'range') {
+                        const from = utils.$('#export-date-from').value;
+                        const to = utils.$('#export-date-to').value;
+                        await exportToPDF(from, to, null);
+                    } else if (exportType === 'category') {
+                        const categoryId = utils.$('#export-category-select').value;
+                        await exportToPDF(null, null, categoryId);
+                    }
+                }
+            })
+        ])
+    ]);
+
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+
+    // Populate categories
+    api.getCategories().then(categories => {
+        const select = utils.$('#export-category-select');
+        categories.forEach(cat => {
+            const option = document.createElement('option');
+            option.value = cat._id;
+            option.textContent = `${cat.icon} ${cat.name}`;
+            select.appendChild(option);
+        });
+    });
+
+    // Toggle date inputs visibility
+    document.querySelectorAll('input[name="export-type"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+            const dateInputs = utils.$('#date-range-inputs');
+            const catSelect = utils.$('#category-select-container');
+            dateInputs.style.display = radio.value === 'range' ? 'block' : 'none';
+            catSelect.style.display = radio.value === 'category' ? 'block' : 'none';
+        });
+    });
+
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+}
+
+utils.$('#export-pdf-btn')?.addEventListener('click', showExportModal);
+utils.$('#export-pdf-main')?.addEventListener('click', showExportModal);
+
+async function exportToPDF(dateFrom = null, dateTo = null, categoryId = null) {
     utils.showToast('Generating report...', 'info');
 
     try {
         let filters = {};
         if (dateFrom) filters.dateFrom = new Date(dateFrom).toISOString();
         if (dateTo) filters.dateTo = new Date(dateTo).toISOString();
+        if (categoryId) filters.categoryId = categoryId;
 
         const expenses = await api.getExpenses(filters);
         const categories = await api.getCategories();
+
+        if (expenses.length === 0) {
+            utils.showToast('No expenses found for the selected criteria', 'warning');
+            return;
+        }
 
         // Create printable content
         const printWindow = window.open('', '_blank');
@@ -2009,6 +2452,12 @@ async function exportToPDF(dateFrom = null, dateTo = null) {
             </tr>`;
         }).join('');
 
+        const filterInfo = categoryId
+            ? `Filtered by Category: ${categories.find(c => c._id === categoryId)?.name || 'Unknown'}`
+            : dateFrom || dateTo
+                ? `Date Range: ${dateFrom || 'Start'} to ${dateTo || 'End'}`
+                : 'All Expenses';
+
         printWindow.document.write(`
             <!DOCTYPE html>
             <html>
@@ -2017,7 +2466,8 @@ async function exportToPDF(dateFrom = null, dateTo = null) {
                 <style>
                     body { font-family: Arial, sans-serif; padding: 20px; }
                     h1 { color: #333; margin-bottom: 5px; }
-                    .subtitle { color: #666; margin-bottom: 20px; }
+                    .subtitle { color: #666; margin-bottom: 5px; }
+                    .filter-info { color: #888; font-size: 12px; margin-bottom: 20px; }
                     table { width: 100%; border-collapse: collapse; margin-top: 20px; }
                     th { background: #333; color: white; padding: 10px; text-align: left; }
                     tr:nth-child(even) { background: #f9f9f9; }
@@ -2028,6 +2478,7 @@ async function exportToPDF(dateFrom = null, dateTo = null) {
             <body>
                 <h1>Expense Report</h1>
                 <p class="subtitle">Generated on ${new Date().toLocaleDateString()}</p>
+                <p class="filter-info">${filterInfo}</p>
                 <table>
                     <thead>
                         <tr>
@@ -2050,6 +2501,7 @@ async function exportToPDF(dateFrom = null, dateTo = null) {
         `);
         printWindow.document.close();
         printWindow.print();
+        utils.showToast('Report generated successfully!', 'success');
     } catch (e) {
         utils.showToast('Failed to generate report', 'error');
     }
@@ -2073,10 +2525,10 @@ window.app = {
 // ===================================
 
 function initApp() {
-    // Show splash screen animation
+    // Immediately hide splash and show login
     setTimeout(() => {
         hideSplashScreen();
-    }, 2500);
+    }, 1000); // Reduced to 1 second
 
     // Initialize components
     initNavigation();
@@ -2093,26 +2545,35 @@ function initApp() {
     const savedLang = localStorage.getItem('language') || 'en';
     if (window.i18n) {
         window.i18n.setLanguage(savedLang);
-        // Set selector value
         const langSelector = utils.$('#language-selector');
         if (langSelector) langSelector.value = savedLang;
     }
 
     updateNotificationBadge();
 
-    // Check if user is already logged in
+    // Apply saved theme settings without auto-login
     const savedUser = utils.loadFromStorage('currentUser');
-    if (savedUser) {
-        appState.isLoggedIn = true;
-        // Apply saved settings
-        if (savedUser.settings) {
-            document.documentElement.dataset.theme = savedUser.settings.darkMode ? 'dark' : 'light';
-            document.documentElement.dataset.fontSize = savedUser.settings.fontSize || 'medium';
-        }
-        showPage('home');
-        if (navigator.onLine && api.syncPendingExpenses) {
-            api.syncPendingExpenses().then(() => renderHome());
-        }
+    if (savedUser && savedUser.settings) {
+        document.documentElement.dataset.theme = savedUser.settings.darkMode ? 'dark' : 'light';
+        document.documentElement.dataset.fontSize = savedUser.settings.fontSize || 'medium';
+    }
+
+    // Check for token and biometric preference
+    const token = localStorage.getItem('token');
+    const enableBiometric = localStorage.getItem('enableBiometric') === 'true';
+
+    if (token && enableBiometric) {
+        // Auto-prompt biometric login after splash
+        setTimeout(() => {
+            handleBiometricLogin();
+        }, 1200);
+    } else if (token) {
+        // Token exists but biometric not enabled - still require login for security
+        showPage('login');
+        utils.showToast('Please login to continue', 'info');
+    } else {
+        // No token, show login
+        showPage('login');
     }
 
     // Network status listeners

@@ -8,9 +8,13 @@ const API_BASE_URL = window.location.hostname === 'localhost' || window.location
 
 // Initialize Dexie (IndexedDB)
 const db = new Dexie('MezgebDB');
-db.version(1).stores({
-    expenses: '++id, _id, categoryId, amount, reason, date, status', // status: 'synced' or 'pending'
+db.version(2).stores({
+    // Use _id as the primary key since it's unique from MongoDB or generated for pending
+    expenses: '_id, categoryId, amount, reason, date, status',
     categories: '_id, name, icon'
+}).upgrade(tx => {
+    // Basic upgrade logic if needed, but version 2 with _id as key is safer
+    return tx.expenses.clear();
 });
 
 const api = {
@@ -29,19 +33,31 @@ const api = {
                 headers
             });
 
+            // Handle empty responses (like 204 No Content)
+            if (response.status === 204) return null;
+
             const data = await response.json();
 
             if (!response.ok) {
                 throw new Error(data.error || 'Something went wrong');
             }
 
-            // If it's a GET request for expenses or categories, cache it
-            if (!options.method || options.method === 'GET') {
-                if (endpoint.startsWith('/expenses')) {
-                    // Only remove synced expenses to keep pending ones
+            // Sync local cache for successful operations
+            if (endpoint.startsWith('/expenses')) {
+                if (!options.method || options.method === 'GET') {
+                    // Cache fetched expenses
                     await db.expenses.where({ status: 'synced' }).delete();
                     await db.expenses.bulkAdd(data.map(e => ({ ...e, status: 'synced' })));
-                } else if (endpoint.startsWith('/categories')) {
+                } else if (options.method === 'PATCH') {
+                    // Update local copy
+                    await db.expenses.update(data._id, { ...data, status: 'synced' });
+                } else if (options.method === 'DELETE') {
+                    // Extract ID from endpoint /expenses/:id
+                    const id = endpoint.split('/').pop();
+                    await db.expenses.delete(id);
+                }
+            } else if (endpoint.startsWith('/categories')) {
+                if (!options.method || options.method === 'GET') {
                     await db.categories.clear();
                     await db.categories.bulkAdd(data);
                 }
@@ -69,8 +85,7 @@ const api = {
         if (endpoint.startsWith('/categories') && (!options.method || options.method === 'GET')) {
             const cats = await db.categories.toArray();
             if (cats.length > 0) return cats;
-            // Fallback to basic categories if DB is empty
-            return window.appData?.categories || [];
+            return [];
         }
 
         // POST Expense
@@ -110,8 +125,9 @@ const api = {
 
         for (const exp of pending) {
             try {
-                const { _id, status, id, ...cleanData } = exp;
-                await fetch(`${API_BASE_URL}/expenses`, {
+                // Remove internal Dexie/metadata before sending to backend
+                const { _id, status, ...cleanData } = exp;
+                const response = await fetch(`${API_BASE_URL}/expenses`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -119,8 +135,13 @@ const api = {
                     },
                     body: JSON.stringify(cleanData)
                 });
-                // Remove from offline DB or mark as synced
-                await db.expenses.delete(exp.id);
+
+                if (response.ok) {
+                    const savedExpense = await response.json();
+                    // Replace pending item with synced one from server
+                    await db.expenses.delete(exp._id);
+                    await db.expenses.add({ ...savedExpense, status: 'synced' });
+                }
             } catch (e) {
                 console.error('Failed to sync expense:', exp, e);
             }
@@ -157,7 +178,6 @@ const api = {
             method: 'PATCH',
             body: JSON.stringify(settings)
         });
-        // Update local storage
         localStorage.setItem('currentUser', JSON.stringify(data));
         return data;
     },
