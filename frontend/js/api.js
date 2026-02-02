@@ -20,7 +20,6 @@ const api = {
     db,
     // ... (request method stays same) ...
     async request(endpoint, options = {}) {
-        // ... (existing code) ...
         const token = localStorage.getItem('token');
         const headers = {
             'Content-Type': 'application/json',
@@ -101,7 +100,12 @@ const api = {
             return collection.toArray();
         }
 
-        // ... existing categories/post logic ...
+        // GET Categories
+        if (endpoint.startsWith('/categories') && (!options.method || options.method === 'GET')) {
+            const cats = await db.categories.toArray();
+            if (cats.length > 0) return cats;
+            return [];
+        }
         // POST Expense
         if (endpoint === '/expenses' && options.method === 'POST') {
             const expenseData = JSON.parse(options.body);
@@ -121,7 +125,120 @@ const api = {
         throw new Error('Offline: Action not supported.');
     },
 
-    // ... (rest of methods) ...
+    async registerSync() {
+        if ('serviceWorker' in navigator && 'SyncManager' in window) {
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                await reg.sync.register('sync-data');
+            } catch (e) {
+                console.error('Background sync registration failed:', e);
+            }
+        }
+    },
+
+    // Sync pending data (categories and expenses)
+    async syncPendingData() {
+        if (!navigator.onLine) return;
+
+        // 1. Sync Categories First
+        const pendingCats = await db.categories.where({ status: 'pending' }).toArray();
+        for (const cat of pendingCats) {
+            try {
+                const { _id, status, ...cleanData } = cat;
+                const response = await fetch(`${API_BASE_URL}/categories`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify(cleanData)
+                });
+
+                if (response.ok) {
+                    const savedCat = await response.json();
+                    await db.categories.delete(cat._id);
+                    await db.categories.add(savedCat);
+                }
+            } catch (e) { console.error('Failed to sync category:', cat, e); }
+        }
+
+        // 2. Sync Expenses
+        const pendingExpenses = await db.expenses.where({ status: 'pending' }).toArray();
+        for (const exp of pendingExpenses) {
+            try {
+                const { _id, status, ...cleanData } = exp;
+                const response = await fetch(`${API_BASE_URL}/expenses`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify(cleanData)
+                });
+
+                if (response.ok) {
+                    const savedExpense = await response.json();
+                    await db.expenses.delete(exp._id);
+                    await db.expenses.add({ ...savedExpense, status: 'synced' });
+                }
+            } catch (e) {
+                console.error('Failed to sync expense:', exp, e);
+            }
+        }
+    },
+
+    // Auth
+    async login(credentials) {
+        const data = await this.request('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify(credentials)
+        });
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('currentUser', JSON.stringify(data.user));
+        return data;
+    },
+
+    async register(userData) {
+        const data = await this.request('/auth/register', {
+            method: 'POST',
+            body: JSON.stringify(userData)
+        });
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('currentUser', JSON.stringify(data.user));
+        return data;
+    },
+
+    async getProfile() {
+        return this.request('/auth/me');
+    },
+
+    async updateSettings(settings) {
+        const data = await this.request('/auth/settings', {
+            method: 'PATCH',
+            body: JSON.stringify(settings)
+        });
+        localStorage.setItem('currentUser', JSON.stringify(data));
+        return data;
+    },
+
+    // Categories
+    async getCategories() {
+        return this.request('/categories');
+    },
+
+    async createCategory(categoryData) {
+        return this.request('/categories', {
+            method: 'POST',
+            body: JSON.stringify(categoryData)
+        });
+    },
+
+    async updateCategory(id, categoryData) {
+        return this.request(`/categories/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(categoryData)
+        });
+    },
 
     // Groups
     async createGroup(groupData) {

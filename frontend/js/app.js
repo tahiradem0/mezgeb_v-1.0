@@ -108,6 +108,7 @@ function showPage(pageName, pushState = true) {
             renderReport();
         } else if (pageName === 'settings') {
             renderSettings();
+            setTimeout(renderGroupsSettings, 50); // Small delay to ensure DOM is ready
         } else if (pageName === 'add-expense') {
             renderAddExpense();
         }
@@ -204,17 +205,32 @@ function initAuth() {
 
 async function handleLogin(credentials) {
     try {
+        const btn = utils.$('#login-form button[type="submit"]');
+        if (btn) btn.disabled = true;
+
         utils.showToast('Signing in...', 'info');
+
+        if (typeof api.login !== 'function') {
+            throw new Error('API Login function missing. Please reload.');
+        }
+
         const data = await api.login(credentials);
+
+        // Save phone for autofill
+        utils.saveToStorage('savedPhone', credentials.phone);
+
         appState.isLoggedIn = true;
         utils.showToast('Welcome back!', 'success');
 
-        // Save biometric preference if needed (usually done in settings, but default to true if they want)
-        // localStorage.setItem('enableBiometric', 'true'); 
+        await initGroups(); // Load shared groups
 
         showPage('home');
     } catch (e) {
-        utils.showToast(e.message, 'error');
+        console.error(e);
+        utils.showToast(e.message || 'Login failed. Check your connection.', 'error');
+    } finally {
+        const btn = utils.$('#login-form button[type="submit"]');
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -226,6 +242,7 @@ async function handleRegister(data) {
         await api.register(data);
         appState.isLoggedIn = true;
         utils.showToast('Account created successfully!', 'success');
+        await initGroups();
         showPage('home');
     } catch (e) {
         utils.showToast(e.message, 'error');
@@ -284,6 +301,19 @@ function initHome() {
             }
         });
     });
+
+    // Swipe handling for context
+    const swipeContainer = utils.$('#home-context-container');
+    if (swipeContainer) {
+        swipeContainer.addEventListener('touchstart', e => {
+            touchStartX = e.changedTouches[0].screenX;
+        }, { passive: true });
+
+        swipeContainer.addEventListener('touchend', e => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipe();
+        }, { passive: true });
+    }
 }
 
 async function renderHome() {
@@ -299,7 +329,7 @@ async function renderHome() {
         }
 
         const categories = await api.getCategories();
-        const expenses = await api.getExpenses();
+        const expenses = await api.getExpenses({ groupId: appState.currentGroupId || undefined });
 
         window.appData = window.appData || {};
         window.appData.categories = categories;
@@ -471,7 +501,11 @@ async function openCategoryDetail(category) {
         utils.$('#category-title').textContent = `${category.icon} ${category.name} Expenses`;
 
         // Fetch expenses for this category
-        const expenses = await api.getExpenses({ categoryId: category._id });
+        // Fetch expenses for this category and current group
+        const expenses = await api.getExpenses({
+            categoryId: category._id,
+            groupId: appState.currentGroupId || undefined
+        });
 
         // Render logic for Category Detail
         const totalSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
@@ -745,7 +779,8 @@ async function handleAddExpense() {
             amount,
             reason,
             date: date.toISOString(),
-            dateEthiopian: utils.toEthiopianDate(date)
+            dateEthiopian: utils.toEthiopianDate(date),
+            groupId: appState.currentGroupId || undefined
         };
 
         await api.createExpense(expenseData);
@@ -825,7 +860,7 @@ function initReport() {
 
 async function renderReport() {
     try {
-        const expenses = await api.getExpenses();
+        const expenses = await api.getExpenses({ groupId: appState.currentGroupId || undefined });
         renderReportExpenses();
         updateReportChartWithData(expenses, 'weekly');
     } catch (e) {
@@ -843,7 +878,8 @@ async function renderReportExpenses() {
             dateFrom: appState.filters.dateFrom || '',
             dateTo: appState.filters.dateTo || '',
             amountMin: appState.filters.amountMin || '',
-            amountMax: appState.filters.amountMax || ''
+            amountMax: appState.filters.amountMax || '',
+            groupId: appState.currentGroupId || undefined
         };
 
         const expenses = await api.getExpenses(filters);
@@ -2558,7 +2594,283 @@ window.app = {
 // Initialization
 // ===================================
 
-function initApp() {
+// ===================================
+// Group / Shared Expense Logic
+// ===================================
+
+async function initGroups() {
+    if (!appState.isLoggedIn) return;
+    try {
+        const groups = await api.getMyGroups();
+        appState.groups = groups || [];
+        updateHomeContextUI();
+    } catch (e) {
+        console.error('Failed to load groups:', e);
+    }
+}
+
+function renderGroupsSettings() {
+    const listContainer = utils.$('#shared-groups-list');
+    if (!listContainer) return;
+
+    listContainer.innerHTML = '';
+
+    if (!appState.groups || appState.groups.length === 0) {
+        listContainer.innerHTML = `
+            <div class="empty-state" style="padding: 10px; text-align: left;">
+                <p style="font-size: 0.8rem;">No shared connections yet.</p>
+            </div>
+        `;
+    } else {
+        appState.groups.forEach(group => {
+            const item = utils.createElement('div', {
+                className: 'category-card',
+                style: 'padding: 12px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;'
+            }, [
+                utils.createElement('div', {}, [
+                    utils.createElement('h4', { textContent: group.name, style: 'margin: 0; font-size: 0.9rem;' }),
+                    utils.createElement('p', { textContent: `ID: ${group.connectionId}`, style: 'margin: 0; font-size: 0.7rem; opacity: 0.7;' })
+                ]),
+                utils.createElement('span', { textContent: 'Active', style: 'color: var(--color-success); font-size: 0.7rem;' })
+            ]);
+            listContainer.appendChild(item);
+        });
+    }
+
+    const connectBtn = utils.$('#connect-group-btn');
+    if (connectBtn) {
+        connectBtn.onclick = showConnectGroupModal;
+    }
+}
+
+function showConnectGroupModal() {
+    // Create Modal Content
+    const content = utils.createElement('div', { style: 'padding-bottom: 20px;' }, [
+        utils.createElement('div', { className: 'modal-header' }, [
+            utils.createElement('h3', { textContent: 'Connect Partner' }),
+            utils.createElement('button', { className: 'modal-close', textContent: '×', onClick: () => utils.closeModal() })
+        ]),
+        utils.createElement('div', { className: 'tabs', style: 'display: flex; gap: 10px; margin-bottom: 20px;' }, [
+            utils.createElement('button', {
+                className: 'btn btn-primary',
+                textContent: 'Join Existing',
+                style: 'flex: 1; font-size: 0.8rem;',
+                id: 'tab-join',
+                onClick: (e) => switchModalTab(e, 'join')
+            }),
+            utils.createElement('button', {
+                className: 'btn btn-outline',
+                textContent: 'Create New',
+                style: 'flex: 1; font-size: 0.8rem;',
+                id: 'tab-create',
+                onClick: (e) => switchModalTab(e, 'create')
+            })
+        ]),
+        // Form Container
+        utils.createElement('div', { id: 'modal-form-container' })
+    ]);
+
+    utils.showModal(content);
+    // Initial render
+    renderJoinForm();
+}
+
+function switchModalTab(e, tab) {
+    const btns = document.querySelectorAll('.tabs button');
+    btns.forEach(b => {
+        b.classList.remove('btn-primary');
+        b.classList.add('btn-outline');
+    });
+    e.target.classList.remove('btn-outline');
+    e.target.classList.add('btn-primary');
+
+    if (tab === 'join') renderJoinForm();
+    else renderCreateForm();
+}
+
+function renderJoinForm() {
+    const container = utils.$('#modal-form-container');
+    container.innerHTML = '';
+
+    container.appendChild(utils.createElement('p', { textContent: 'Enter the details shared by your partner.', style: 'font-size: 0.8rem; margin-bottom: 15px; opacity: 0.7;' }));
+
+    const phoneInput = utils.createElement('input', { type: 'tel', placeholder: 'Partner Phone Number', className: 'date-input', style: 'width: 100%; margin-bottom: 10px;' });
+    const idInput = utils.createElement('input', { type: 'text', placeholder: 'Connection ID (e.g., CONN-1234)', className: 'date-input', style: 'width: 100%; margin-bottom: 20px;' });
+
+    const submitBtn = utils.createElement('button', { className: 'btn btn-primary btn-full', textContent: 'Connect' });
+
+    submitBtn.onclick = async () => {
+        const phone = phoneInput.value.trim();
+        const id = idInput.value.trim();
+        if (!phone || !id) return utils.showToast('Please fill all fields', 'error');
+
+        try {
+            submitBtn.textContent = 'Connecting...';
+            // Assuming api.joinGroup is restored
+            if (typeof api.joinGroup !== 'function') throw new Error('API Join function missing');
+            await api.joinGroup({ partnerPhone: phone, connectionId: id });
+            utils.showToast('Connected successfully!', 'success');
+            await initGroups();
+            renderGroupsSettings();
+            utils.closeModal();
+        } catch (e) {
+            utils.showToast(e.message, 'error');
+            submitBtn.textContent = 'Connect';
+        }
+    };
+
+    container.append(phoneInput, idInput, submitBtn);
+}
+
+function renderCreateForm() {
+    const container = utils.$('#modal-form-container');
+    container.innerHTML = '';
+
+    const randomId = 'CONN-' + Math.floor(1000 + Math.random() * 9000);
+
+    container.appendChild(utils.createElement('p', { textContent: 'Create a shared space. Share this ID with your partner.', style: 'font-size: 0.8rem; margin-bottom: 15px; opacity: 0.7;' }));
+
+    const nameInput = utils.createElement('input', { type: 'text', placeholder: 'Group Name (e.g., Home, Business)', className: 'date-input', style: 'width: 100%; margin-bottom: 10px;' });
+    const idInput = utils.createElement('input', { type: 'text', value: randomId, readOnly: true, className: 'date-input', style: 'width: 100%; margin-bottom: 20px; background: var(--color-surface-elevated);' });
+
+    const submitBtn = utils.createElement('button', { className: 'btn btn-primary btn-full', textContent: 'Create Connection' });
+
+    submitBtn.onclick = async () => {
+        const name = nameInput.value.trim();
+        if (!name) return utils.showToast('Please enter a name', 'error');
+
+        try {
+            submitBtn.textContent = 'Creating...';
+            if (typeof api.createGroup !== 'function') throw new Error('API Create function missing');
+            await api.createGroup({ name, connectionId: randomId });
+            utils.showToast('Group created!', 'success');
+            await initGroups();
+            renderGroupsSettings();
+            utils.closeModal();
+        } catch (e) {
+            utils.showToast(e.message, 'error');
+            submitBtn.textContent = 'Create Connection';
+        }
+    };
+
+    container.append(nameInput, idInput, submitBtn);
+}
+
+// Global Swipe State
+let touchStartX = 0;
+let touchEndX = 0;
+
+function handleSwipe() {
+    const SWIPE_THRESHOLD = 50;
+    if (touchEndX < touchStartX - SWIPE_THRESHOLD) {
+        // Swiped Left -> Next Context
+        switchContext('next');
+    }
+    if (touchEndX > touchStartX + SWIPE_THRESHOLD) {
+        // Swiped Right -> Prev Context
+        switchContext('prev');
+    }
+}
+
+function switchContext(direction) {
+    if (!appState.groups || appState.groups.length === 0) return; // No groups to switch to
+
+    /* 
+       Contexts:
+       0: Personal (currentGroupId: null)
+       1..N: Groups (currentGroupId: appState.groups[i-1]._id)
+    */
+
+    const allContexts = [null, ...appState.groups.map(g => g._id)];
+    const currentIndex = allContexts.indexOf(appState.currentGroupId);
+    let nextIndex;
+
+    if (direction === 'next') {
+        nextIndex = (currentIndex + 1) % allContexts.length;
+    } else {
+        nextIndex = (currentIndex - 1 + allContexts.length) % allContexts.length;
+    }
+
+    if (nextIndex === currentIndex) return;
+
+    // Animate
+    const container = utils.$('#home-context-container');
+    const outClass = direction === 'next' ? 'slide-out-left' : 'slide-out-right';
+    const inClass = direction === 'next' ? 'slide-in-right' : 'slide-in-left';
+
+    if (container) {
+        container.classList.add(outClass);
+
+        // Wait for animation
+        setTimeout(async () => {
+            // Update State
+            appState.currentGroupId = allContexts[nextIndex];
+
+            // Update UI
+            updateHomeContextUI();
+
+            // Re-render Data
+            // We need to fetch invalidating current expense list?
+            // api.getExpenses will filter by valid group
+            // We just call renderHome/renderRecentExpenses
+            await renderHome();
+
+            // Reset and Animate In
+            container.classList.remove(outClass);
+            container.classList.add(inClass);
+            setTimeout(() => container.classList.remove(inClass), 300);
+        }, 200);
+    }
+}
+
+function updateHomeContextUI() {
+    const headerSection = utils.$('#context-header-section');
+    const label = utils.$('#current-context-label');
+    const dotsContainer = utils.$('.context-indicator-wrapper');
+
+    if (!appState.groups || appState.groups.length === 0) {
+        if (headerSection) headerSection.style.display = 'none';
+        return;
+    }
+
+    if (headerSection) headerSection.style.display = 'block';
+
+    const allContexts = [null, ...appState.groups.map(g => g._id)]; // null = Personal
+    // Ensure currentGroupId is valid
+    if (appState.currentGroupId && !allContexts.includes(appState.currentGroupId)) {
+        appState.currentGroupId = null;
+    }
+
+    const currentIndex = allContexts.indexOf(appState.currentGroupId);
+
+    // Label
+    if (appState.currentGroupId === null) {
+        if (label) label.textContent = 'Personal Expenses';
+    } else {
+        const group = appState.groups.find(g => g._id === appState.currentGroupId);
+        if (label) label.textContent = group ? group.name : 'Shared Group';
+    }
+
+    // Dots
+    if (dotsContainer) {
+        dotsContainer.innerHTML = '';
+        allContexts.forEach((_, i) => {
+            const dot = utils.createElement('span', { className: `context-dot ${i === currentIndex ? 'active' : ''}` });
+            dotsContainer.appendChild(dot);
+        });
+    }
+}
+
+async function initApp() {
+    // Check for existing session
+    const user = localStorage.getItem('currentUser');
+    const token = localStorage.getItem('token');
+
+    if (user && token) {
+        appState.isLoggedIn = true;
+        await initGroups();
+    }
+
     // Immediately hide splash and show login
     setTimeout(() => {
         hideSplashScreen();
