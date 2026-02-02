@@ -2567,83 +2567,82 @@ function initApp() {
     }
 
     // Main App Init - Handles flow based on token but enforces manual login
-    async function initApp() {
-        // Always show login to satisfy "no automatic login" + "password needed every time"
-        showPage('login', false);
+    // Always show login to satisfy "no automatic login" + "password needed every time"
+    showPage('login', false);
 
-        // Network status listeners
-        utils.addNetworkListeners(
-            () => {
-                utils.showToast('You are back online!', 'success');
-                // Use updated sync name
-                if (api.syncPendingData) api.syncPendingData().then(() => {
+    // Network status listeners
+    utils.addNetworkListeners(
+        () => {
+            utils.showToast('You are back online!', 'success');
+            // Use updated sync name
+            if (api.syncPendingData) api.syncPendingData().then(() => {
+                if (appState.currentPage === 'home') renderHome();
+            });
+        },
+        () => utils.showToast('You are offline. Changes will sync when online.', 'warning')
+    );
+
+    // Service Worker messages
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', async (event) => {
+            if (event.data.type === 'TRIGGER_SYNC') {
+                console.log('Background sync triggered from Service Worker');
+                if (api.syncPendingData) {
+                    await api.syncPendingData();
                     if (appState.currentPage === 'home') renderHome();
-                });
-            },
-            () => utils.showToast('You are offline. Changes will sync when online.', 'warning')
-        );
-
-        // Service Worker messages
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.addEventListener('message', async (event) => {
-                if (event.data.type === 'TRIGGER_SYNC') {
-                    console.log('Background sync triggered from Service Worker');
-                    if (api.syncPendingData) {
-                        await api.syncPendingData();
-                        if (appState.currentPage === 'home') renderHome();
-                    }
                 }
-            });
-        }
+            }
+        });
     }
+}
 
-    document.addEventListener('DOMContentLoaded', () => {
-        initApp();
+document.addEventListener('DOMContentLoaded', () => {
+    initApp();
 
-        // Register Service Worker
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(registration => {
-                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
-                    }, err => {
-                        console.log('ServiceWorker registration failed: ', err);
-                    });
-            });
-        }
-    });
+    // Register Service Worker
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+                .then(registration => {
+                    console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                }, err => {
+                    console.log('ServiceWorker registration failed: ', err);
+                });
+        });
+    }
+});
 
-    /* ===================================
-       PWA Install Promotion
-       =================================== */
-    let deferredPrompt;
+/* ===================================
+   PWA Install Promotion
+   =================================== */
+let deferredPrompt;
 
-    window.addEventListener('beforeinstallprompt', (e) => {
-        // Prevent the mini-infobar from appearing on mobile
-        e.preventDefault();
-        // Stash the event so it can be triggered later.
-        deferredPrompt = e;
-        // Show install button
-        showInstallButton();
-    });
+window.addEventListener('beforeinstallprompt', (e) => {
+    // Prevent the mini-infobar from appearing on mobile
+    e.preventDefault();
+    // Stash the event so it can be triggered later.
+    deferredPrompt = e;
+    // Show install button
+    showInstallButton();
+});
 
-    function showInstallButton() {
-        // Try to find a place in Settings
-        // We check if utility is available, otherwise waiting for DOM might be needed
-        // But since this event usually fires slightly after load, DOM should be ready or initApp renders it
+function showInstallButton() {
+    // Try to find a place in Settings
+    // We check if utility is available, otherwise waiting for DOM might be needed
+    // But since this event usually fires slightly after load, DOM should be ready or initApp renders it
 
-        // We target the Settings page logout button container
-        // We perform a check to ensure we don't add duplicate buttons
-        if (document.getElementById('pwa-install-btn')) return;
+    // We target the Settings page logout button container
+    // We perform a check to ensure we don't add duplicate buttons
+    if (document.getElementById('pwa-install-btn')) return;
 
-        const logoutBtn = document.getElementById('logout-btn');
-        if (logoutBtn && deferredPrompt) {
-            const installBtn = document.createElement('button');
-            installBtn.id = 'pwa-install-btn';
-            installBtn.className = 'btn btn-primary btn-full';
-            installBtn.style.marginBottom = '16px';
-            installBtn.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Distinct Green
-            installBtn.innerHTML = `
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn && deferredPrompt) {
+        const installBtn = document.createElement('button');
+        installBtn.id = 'pwa-install-btn';
+        installBtn.className = 'btn btn-primary btn-full';
+        installBtn.style.marginBottom = '16px';
+        installBtn.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Distinct Green
+        installBtn.innerHTML = `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;vertical-align:middle;">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                 <polyline points="7 10 12 15 17 10"></polyline>
@@ -2652,17 +2651,17 @@ function initApp() {
             Install App
         `;
 
-            installBtn.addEventListener('click', async () => {
-                if (!deferredPrompt) return;
-                deferredPrompt.prompt();
-                const { outcome } = await deferredPrompt.userChoice;
-                console.log(`User response to the install prompt: ${outcome}`);
-                if (outcome === 'accepted') {
-                    deferredPrompt = null;
-                    installBtn.remove();
-                }
-            });
+        installBtn.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            console.log(`User response to the install prompt: ${outcome}`);
+            if (outcome === 'accepted') {
+                deferredPrompt = null;
+                installBtn.remove();
+            }
+        });
 
-            logoutBtn.parentNode.insertBefore(installBtn, logoutBtn);
-        }
+        logoutBtn.parentNode.insertBefore(installBtn, logoutBtn);
     }
+}
