@@ -339,24 +339,35 @@ async function renderHome() {
         const lifeHtml = `${utils.formatCurrency(lifetimeTotal)} <span class="currency">ETB</span>`;
 
         monthAmountEl.innerHTML = monthHtml;
-        monthAmountEl.classList.remove('hidden-val');
-
         lifetimeAmountEl.innerHTML = lifeHtml;
 
-        // Toggle Eye Logic
-        const eye = utils.$('#toggle-month-eye');
-        if (eye) {
-            // Remove old listener to prevent duplicates if any (using overwriting onclick usually safer)
-            eye.onclick = (e) => {
+        // Single Toggle Eye Logic for BOTH amounts
+        const eyeBtn = utils.$('#toggle-expenses-eye');
+        if (eyeBtn) {
+            // Check if already hidden (persist state)
+            const isHidden = monthAmountEl.dataset.hidden === 'true';
+            if (isHidden) {
+                monthAmountEl.textContent = '****';
+                lifetimeAmountEl.textContent = '****';
+                eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+            }
+
+            eyeBtn.onclick = (e) => {
                 e.stopPropagation();
                 if (monthAmountEl.dataset.hidden === 'true') {
+                    // Show values
                     monthAmountEl.innerHTML = monthHtml;
+                    lifetimeAmountEl.innerHTML = lifeHtml;
                     monthAmountEl.dataset.hidden = 'false';
-                    eye.textContent = '👁️';
+                    lifetimeAmountEl.dataset.hidden = 'false';
+                    eyeBtn.innerHTML = '<i class="fas fa-eye"></i>';
                 } else {
+                    // Hide values
                     monthAmountEl.textContent = '****';
+                    lifetimeAmountEl.textContent = '****';
                     monthAmountEl.dataset.hidden = 'true';
-                    eye.textContent = '👁️‍🗨️';
+                    lifetimeAmountEl.dataset.hidden = 'true';
+                    eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
                 }
             };
         }
@@ -474,36 +485,33 @@ async function openCategoryDetail(category) {
         totalEl.innerHTML = totalHtml;
         monthEl.innerHTML = monthHtml;
 
-        // Toggle Eyes
-        const eyeTotal = utils.$('#toggle-cat-total-eye');
-        const eyeMonth = utils.$('#toggle-cat-month-eye');
+        // Single Toggle Eye for both values
+        const eyeBtn = utils.$('#toggle-cat-eye');
+        if (eyeBtn) {
+            // Check if already hidden (persist state)
+            const isHidden = totalEl.dataset.hidden === 'true';
+            if (isHidden) {
+                totalEl.textContent = '****';
+                monthEl.textContent = '****';
+                eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+            }
 
-        if (eyeTotal) {
-            eyeTotal.onclick = (e) => {
+            eyeBtn.onclick = (e) => {
                 e.stopPropagation();
                 if (totalEl.dataset.hidden === 'true') {
+                    // Show values
                     totalEl.innerHTML = totalHtml;
-                    totalEl.dataset.hidden = 'false';
-                    eyeTotal.textContent = '👁️';
-                } else {
-                    totalEl.textContent = '****';
-                    totalEl.dataset.hidden = 'true';
-                    eyeTotal.textContent = '👁️‍🗨️';
-                }
-            };
-        }
-
-        if (eyeMonth) {
-            eyeMonth.onclick = (e) => {
-                e.stopPropagation();
-                if (monthEl.dataset.hidden === 'true') {
                     monthEl.innerHTML = monthHtml;
+                    totalEl.dataset.hidden = 'false';
                     monthEl.dataset.hidden = 'false';
-                    eyeMonth.textContent = '👁️';
+                    eyeBtn.innerHTML = '<i class="fas fa-eye"></i>';
                 } else {
+                    // Hide values
+                    totalEl.textContent = '****';
                     monthEl.textContent = '****';
+                    totalEl.dataset.hidden = 'true';
                     monthEl.dataset.hidden = 'true';
-                    eyeMonth.textContent = '👁️‍🗨️';
+                    eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
                 }
             };
         }

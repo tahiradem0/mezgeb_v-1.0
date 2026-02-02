@@ -687,6 +687,17 @@ ol {
     opacity: 0.8;
 }
 
+.total-expense-card .privacy-toggle {
+    opacity: 0.8;
+    transition: all 0.3s ease;
+}
+
+.total-expense-card .privacy-toggle:hover {
+    opacity: 1;
+    transform: scale(1.1);
+    background: rgba(255, 255, 255, 0.15);
+}
+
 .expense-trend {
     display: flex;
     align-items: center;
