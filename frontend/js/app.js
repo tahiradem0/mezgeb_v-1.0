@@ -16,7 +16,9 @@ const appState = {
         dateTo: null,
         amountMin: null,
         amountMax: null
-    }
+    },
+    currentGroupId: null, // null = Personal
+    groups: [] // List of connected groups
 };
 
 // ===================================
@@ -334,22 +336,27 @@ async function renderHome() {
         const monthAmountEl = utils.$('#month-amount');
         const lifetimeAmountEl = utils.$('#lifetime-amount');
 
-        // Reset to visible by default or persist state? Default visible.
         const monthHtml = `${utils.formatCurrency(thisMonthTotal)} <span class="currency">ETB</span>`;
         const lifeHtml = `${utils.formatCurrency(lifetimeTotal)} <span class="currency">ETB</span>`;
 
-        monthAmountEl.innerHTML = monthHtml;
-        lifetimeAmountEl.innerHTML = lifeHtml;
-
-        // Single Toggle Eye Logic for BOTH amounts
+        // Single Toggle Eye Logic for BOTH amounts with localStorage persistence
         const eyeBtn = utils.$('#toggle-expenses-eye');
         if (eyeBtn) {
-            // Check if already hidden (persist state)
-            const isHidden = monthAmountEl.dataset.hidden === 'true';
+            // Check localStorage for persisted hidden state
+            const isHidden = localStorage.getItem('expenseAmountsHidden') === 'true';
+
             if (isHidden) {
                 monthAmountEl.textContent = '****';
                 lifetimeAmountEl.textContent = '****';
+                monthAmountEl.dataset.hidden = 'true';
+                lifetimeAmountEl.dataset.hidden = 'true';
                 eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+            } else {
+                monthAmountEl.innerHTML = monthHtml;
+                lifetimeAmountEl.innerHTML = lifeHtml;
+                monthAmountEl.dataset.hidden = 'false';
+                lifetimeAmountEl.dataset.hidden = 'false';
+                eyeBtn.innerHTML = '<i class="fas fa-eye"></i>';
             }
 
             eyeBtn.onclick = (e) => {
@@ -361,6 +368,7 @@ async function renderHome() {
                     monthAmountEl.dataset.hidden = 'false';
                     lifetimeAmountEl.dataset.hidden = 'false';
                     eyeBtn.innerHTML = '<i class="fas fa-eye"></i>';
+                    localStorage.setItem('expenseAmountsHidden', 'false');
                 } else {
                     // Hide values
                     monthAmountEl.textContent = '****';
@@ -368,6 +376,7 @@ async function renderHome() {
                     monthAmountEl.dataset.hidden = 'true';
                     lifetimeAmountEl.dataset.hidden = 'true';
                     eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+                    localStorage.setItem('expenseAmountsHidden', 'true');
                 }
             };
         }
@@ -485,15 +494,22 @@ async function openCategoryDetail(category) {
         totalEl.innerHTML = totalHtml;
         monthEl.innerHTML = monthHtml;
 
-        // Single Toggle Eye for both values
+        // Single Toggle Eye for both values with localStorage persistence
         const eyeBtn = utils.$('#toggle-cat-eye');
         if (eyeBtn) {
-            // Check if already hidden (persist state)
-            const isHidden = totalEl.dataset.hidden === 'true';
+            // Check localStorage for persisted hidden state (use same key as home page)
+            const isHidden = localStorage.getItem('expenseAmountsHidden') === 'true';
+
             if (isHidden) {
                 totalEl.textContent = '****';
                 monthEl.textContent = '****';
+                totalEl.dataset.hidden = 'true';
+                monthEl.dataset.hidden = 'true';
                 eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+            } else {
+                totalEl.dataset.hidden = 'false';
+                monthEl.dataset.hidden = 'false';
+                eyeBtn.innerHTML = '<i class="fas fa-eye"></i>';
             }
 
             eyeBtn.onclick = (e) => {
@@ -505,6 +521,7 @@ async function openCategoryDetail(category) {
                     totalEl.dataset.hidden = 'false';
                     monthEl.dataset.hidden = 'false';
                     eyeBtn.innerHTML = '<i class="fas fa-eye"></i>';
+                    localStorage.setItem('expenseAmountsHidden', 'false');
                 } else {
                     // Hide values
                     totalEl.textContent = '****';
@@ -512,6 +529,7 @@ async function openCategoryDetail(category) {
                     totalEl.dataset.hidden = 'true';
                     monthEl.dataset.hidden = 'true';
                     eyeBtn.innerHTML = '<i class="fas fa-eye-slash"></i>';
+                    localStorage.setItem('expenseAmountsHidden', 'true');
                 }
             };
         }
