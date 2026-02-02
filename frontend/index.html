@@ -109,22 +109,7 @@
 
                     <button type="submit" class="btn btn-primary btn-full" data-i18n="sign_in">Sign In</button>
 
-                    <div class="auth-divider">
-                        <span data-i18n="or">or</span>
-                    </div>
-
-                    <button type="button" id="biometric-login" class="btn btn-outline btn-full">
-                        <svg class="fingerprint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path
-                                d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04c.054-.16.117-.32.19-.479a15.023 15.023 0 0 0 1.257-6.052c0-2.367 1.343-3.5 2.746-3.5 1.403 0 2.746 1.133 2.746 3.5 0 1.76-.293 3.441-.839 5.015" />
-                            <path
-                                d="M17.5 12c0-4.136-2.463-6.5-5.5-6.5S6.5 7.864 6.5 12c0 1.168-.108 2.308-.32 3.404" />
-                            <path d="M12 2C6.477 2 2 6.477 2 12c0 2.276.523 4.434 1.455 6.356" />
-                            <path d="M22 12c0-5.523-4.477-10-10-10" />
-                        </svg>
-                        <span data-i18n="use_fingerprint">Use Fingerprint</span>
-                    </button>
+                    <!-- Biometric Login Removed -->
                 </form>
 
                 <p class="auth-footer">
@@ -196,13 +181,7 @@
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="enable-biometric">
-                            <span class="checkmark"></span>
-                            <span data-i18n="enable_fingerprint">Enable fingerprint login</span>
-                        </label>
-                    </div>
+                    <!-- Biometric Checkbox Removed -->
 
                     <button type="submit" class="btn btn-primary btn-full" data-i18n="create_account">Create
                         Account</button>
@@ -222,7 +201,7 @@
                 <header class="home-header">
                     <div class="header-left">
                         <p class="greeting">Good Morning</p>
-                        <h1 class="username">Mezgeb</h1>
+                        <h1 class="username">sir</h1>
                     </div>
                     <div class="header-right">
                         <button class="notification-btn notification-bell" aria-label="Notifications">
@@ -240,11 +219,24 @@
 
                 <!-- Total Expense Card -->
                 <div class="total-expense-card">
-                    <p class="card-label">This Month Spend</p>
-                    <h2 class="total-amount">45,750.00 <span class="currency">ETB</span></h2>
-                    <div class="expense-trend">
-                        <span class="trend-badge trend-up">↑ 12%</span>
-                        <span class="trend-text">vs last month</span>
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            <p class="card-label">Overall Total</p>
+                            <h2 class="total-amount" id="lifetime-amount"
+                                style="font-size: 1.4rem; margin-bottom: 4px;">0.00 <span class="currency">ETB</span>
+                            </h2>
+                        </div>
+                        <div style="text-align: right;">
+                            <p class="card-label">This Month <span class="eye-icon" id="toggle-month-eye"
+                                    style="cursor: pointer; margin-left: 5px;">👁️</span></p>
+                            <h2 class="total-amount" id="month-amount">0.00 <span class="currency">ETB</span></h2>
+                        </div>
+                    </div>
+
+                    <div class="expense-trend"
+                        style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px;">
+                        <span class="trend-badge trend-up">↑ 0%</span>
+                        <span class="trend-text">this month vs last month</span>
                     </div>
                 </div>
 
@@ -321,11 +313,13 @@
                 <!-- Category Stats -->
                 <div class="category-stats">
                     <div class="stat-card">
-                        <p class="stat-label">Total Spent</p>
+                        <p class="stat-label">Total Spent <span class="eye-icon" id="toggle-cat-total-eye"
+                                style="cursor: pointer; margin-left: 5px;">👁️</span></p>
                         <h2 class="stat-value" id="category-total">...</h2>
                     </div>
                     <div class="stat-card">
-                        <p class="stat-label">This Month</p>
+                        <p class="stat-label">This Month <span class="eye-icon" id="toggle-cat-month-eye"
+                                style="cursor: pointer; margin-left: 5px;">👁️</span></p>
                         <h2 class="stat-value" id="category-month">...</h2>
                     </div>
                 </div>
@@ -549,8 +543,8 @@
                             <input type="file" id="profile-image-input" accept="image/*" style="display: none;">
                         </div>
                         <div class="profile-info">
-                            <h4 id="settings-username">Mezgeb</h4>
-                            <p id="settings-phone">+251 912 345 678</p>
+                            <h4 id="settings-username"></h4>
+                            <p id="settings-phone">+251-000-000-000</p>
                         </div>
                     </div>
                     <button class="settings-item" id="change-password-btn">
@@ -806,7 +800,7 @@
                     <h3>Select Date</h3>
                     <button class="modal-close" id="close-date-picker">×</button>
                 </div>
-                <div class="ethiopian-calendar" id="ethiopian-calendar">
+                <div class="calendar-container" id="calendar-container">
                     <div class="calendar-header">
                         <button class="calendar-nav-btn" id="prev-month">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

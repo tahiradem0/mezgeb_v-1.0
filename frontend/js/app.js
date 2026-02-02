@@ -70,7 +70,7 @@ function initNavigation() {
     });
 }
 
-function showPage(pageName) {
+function showPage(pageName, pushState = true) {
     const pages = utils.$$('.page');
     const targetPage = utils.$(`#${pageName}-page`);
     const bottomNav = utils.$('#bottom-nav');
@@ -82,6 +82,15 @@ function showPage(pageName) {
     if (targetPage) {
         targetPage.classList.remove('hidden');
         appState.currentPage = pageName;
+
+        // Handle browser history handling
+        if (pushState && pageName !== 'login' && pageName !== 'register') {
+            const state = { page: pageName };
+            // Avoid duplicate pushes
+            if (history.state?.page !== pageName) {
+                history.pushState(state, '', `#${pageName}`);
+            }
+        }
 
         // Show/hide bottom nav based on page
         if (['login', 'register'].includes(pageName)) {
@@ -118,6 +127,16 @@ function showPage(pageName) {
     }
 }
 
+// Handle Back Button
+window.addEventListener('popstate', (event) => {
+    if (event.state && event.state.page) {
+        showPage(event.state.page, false);
+    } else {
+        // Default fallback if no state
+        showPage('home', false);
+    }
+});
+
 // ===================================
 // Authentication
 // ===================================
@@ -127,7 +146,6 @@ function initAuth() {
     const registerForm = utils.$('#register-form');
     const gotoRegister = utils.$('#goto-register');
     const gotoLogin = utils.$('#goto-login');
-    const biometricLogin = utils.$('#biometric-login');
     const togglePasswords = utils.$$('.toggle-password');
 
     // Toggle password visibility
@@ -136,12 +154,8 @@ function initAuth() {
             const input = btn.previousElementSibling;
             const type = input.type === 'password' ? 'text' : 'password';
             input.type = type;
-
-            // Update icon appearance (SVG opacity)
             const svg = btn.querySelector('svg');
-            if (svg) {
-                svg.style.opacity = type === 'password' ? '0.5' : '1';
-            }
+            if (svg) svg.style.opacity = type === 'password' ? '0.5' : '1';
         });
     });
 
@@ -151,7 +165,6 @@ function initAuth() {
         const phone = utils.$('#login-phone').value;
         const password = utils.$('#login-password').value;
 
-        // Simulate login
         if (phone && password) {
             handleLogin({ phone, password });
         }
@@ -163,15 +176,13 @@ function initAuth() {
         const username = utils.$('#register-username').value;
         const phone = utils.$('#register-phone').value;
         const password = utils.$('#register-password').value;
-        const enableBiometric = utils.$('#enable-biometric').checked;
 
-        // Simulate registration
         if (username && phone && password) {
-            handleRegister({ username, phone, password, enableBiometric });
+            handleRegister({ username, phone, password });
         }
     });
 
-    // Navigation between login/register
+    // Navigation
     gotoRegister.addEventListener('click', (e) => {
         e.preventDefault();
         showPage('register');
@@ -182,24 +193,10 @@ function initAuth() {
         showPage('login');
     });
 
-    // Biometric login
-    biometricLogin.addEventListener('click', () => {
-        handleBiometricLogin();
-    });
-
     // Auto-fill phone number if saved
     const savedPhone = utils.loadFromStorage('savedPhone');
     if (savedPhone) {
         utils.$('#login-phone').value = savedPhone;
-    }
-
-    // Checking if we should prompt for biometric immediately
-    const token = localStorage.getItem('token');
-    const enableBiometric = localStorage.getItem('enableBiometric') === 'true';
-
-    if (token && enableBiometric) {
-        // Auto-trigger biometric if enabled
-        setTimeout(() => handleBiometricLogin(), 500);
     }
 }
 
@@ -219,51 +216,13 @@ async function handleLogin(credentials) {
     }
 }
 
-async function verifyBiometric() {
-    // Check WebAuthn support
-    if (!window.PublicKeyCredential) {
-        throw new Error("Biometric not supported");
-    }
-
-    // Check if platform authenticator (fingerprint) is available
-    const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    if (!available) {
-        throw new Error("No platform authenticator available");
-    }
-
-    try {
-        // Use WebAuthn to trigger the actual biometric prompt (fingerprint/face ID)
-        const challenge = new Uint8Array(32);
-        window.crypto.getRandomValues(challenge);
-
-        // This call will show the system's "Verify it's you" dialog
-        await navigator.credentials.get({
-            publicKey: {
-                challenge: challenge,
-                timeout: 60000,
-                userVerification: 'required',
-            }
-        });
-
-        // If the promise resolves, user successfully verified
-        return true;
-    } catch (e) {
-        console.error("Biometric verification failed:", e);
-        // If user actively cancelled, or failed verification
-        throw new Error("Biometric verification failed");
-    }
-}
+// verifyBiometric removed
 
 async function handleRegister(data) {
     try {
         utils.showToast('Creating account...', 'info');
-        const userData = await api.register(data);
+        await api.register(data);
         appState.isLoggedIn = true;
-
-        if (data.enableBiometric) {
-            localStorage.setItem('enableBiometric', 'true');
-        }
-
         utils.showToast('Account created successfully!', 'success');
         showPage('home');
     } catch (e) {
@@ -271,42 +230,7 @@ async function handleRegister(data) {
     }
 }
 
-async function handleBiometricLogin() {
-    // Check if WebAuthn is supported
-    if (window.PublicKeyCredential) {
-        const token = localStorage.getItem('token');
-        if (!token) {
-            utils.showToast('Please login with password first to enable fingerprint', 'info');
-            return;
-        }
-
-        utils.showToast('Verifying fingerprint...', 'info');
-
-        try {
-            // Simulate/Perform biometric challenge
-            await verifyBiometric();
-
-            // Fetch REAL fresh data using the token to verify it's valid
-            try {
-                const userProfile = await api.getProfile();
-                appState.isLoggedIn = true;
-                utils.saveToStorage('currentUser', userProfile); // Update local user data
-                utils.showToast('Authentication successful!', 'success');
-                showPage('home');
-            } catch (err) {
-                // Token might be expired
-                utils.showToast('Session expired. Please login with password.', 'error');
-                handleLogout();
-            }
-
-        } catch (e) {
-            utils.showToast('Biometric authentication failed', 'error');
-        }
-
-    } else {
-        utils.showToast('Biometric login not supported on this device', 'error');
-    }
-}
+// Biometric functions removed
 
 function handleLogout() {
     appState.isLoggedIn = false;
@@ -362,35 +286,24 @@ function initHome() {
 
 async function renderHome() {
     try {
-        // Update greeting
         utils.$('.greeting').textContent = utils.getGreeting();
-
         const currentUser = JSON.parse(localStorage.getItem('currentUser'));
         if (currentUser) {
             utils.$('.username').textContent = currentUser.username;
-
-            // Update profile avatar
             const avatarImg = utils.$('.profile-avatar img');
-            if (avatarImg) {
-                if (currentUser.profileImage) {
-                    avatarImg.src = currentUser.profileImage;
-                } else {
-                    const initials = utils.getInitials(currentUser.username);
-                    avatarImg.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=333&color=fff&size=100&bold=true`;
-                }
+            if (avatarImg && currentUser.profileImage) {
+                avatarImg.src = currentUser.profileImage;
             }
         }
 
-        // Fetch categories and expenses from API
         const categories = await api.getCategories();
         const expenses = await api.getExpenses();
 
-        // Update global appData
         window.appData = window.appData || {};
         window.appData.categories = categories;
         window.appData.expenses = expenses;
 
-        // Calculate total expense for this month
+        // Calculations
         const now = new Date();
         const thisMonthExpenses = expenses.filter(exp => {
             const d = new Date(exp.date);
@@ -398,7 +311,10 @@ async function renderHome() {
         });
         const thisMonthTotal = thisMonthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-        // Calculate last month expense for percentage
+        // Lifetime Total
+        const lifetimeTotal = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+        // Previous Month for Trend
         const lastMonthDate = new Date();
         lastMonthDate.setMonth(now.getMonth() - 1);
         const lastMonthExpenses = expenses.filter(exp => {
@@ -407,41 +323,56 @@ async function renderHome() {
         });
         const lastMonthTotal = lastMonthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-        // Calculate percentage change
         let percentChange = 0;
-        let trend = 'neutral';
         if (lastMonthTotal > 0) {
             percentChange = ((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100;
         } else if (thisMonthTotal > 0) {
-            percentChange = 100; // 100% increase if last month was 0
+            percentChange = 100;
         }
 
-        utils.$('.total-amount').innerHTML = `${utils.formatCurrency(thisMonthTotal)} <span class="currency">ETB</span>`;
+        // DOM Updates with Visibility Logic
+        const monthAmountEl = utils.$('#month-amount');
+        const lifetimeAmountEl = utils.$('#lifetime-amount');
+
+        // Reset to visible by default or persist state? Default visible.
+        const monthHtml = `${utils.formatCurrency(thisMonthTotal)} <span class="currency">ETB</span>`;
+        const lifeHtml = `${utils.formatCurrency(lifetimeTotal)} <span class="currency">ETB</span>`;
+
+        monthAmountEl.innerHTML = monthHtml;
+        monthAmountEl.classList.remove('hidden-val');
+
+        lifetimeAmountEl.innerHTML = lifeHtml;
+
+        // Toggle Eye Logic
+        const eye = utils.$('#toggle-month-eye');
+        if (eye) {
+            // Remove old listener to prevent duplicates if any (using overwriting onclick usually safer)
+            eye.onclick = (e) => {
+                e.stopPropagation();
+                if (monthAmountEl.dataset.hidden === 'true') {
+                    monthAmountEl.innerHTML = monthHtml;
+                    monthAmountEl.dataset.hidden = 'false';
+                    eye.textContent = '👁️';
+                } else {
+                    monthAmountEl.textContent = '****';
+                    monthAmountEl.dataset.hidden = 'true';
+                    eye.textContent = '👁️‍🗨️';
+                }
+            };
+        }
 
         const trendEl = utils.$('.expense-trend');
         const isUp = percentChange > 0;
-        const trendClass = isUp ? 'trend-up' : 'trend-down'; // Assuming trend-down class exists or using trend-up for color
+        const trendClass = isUp ? 'trend-up' : 'trend-down';
         const arrow = isUp ? '↑' : '↓';
-
-        // CSS expects trend-up for red (bad) usually in expense trackers, or green? 
-        // Usually more expense = bad (Red), less = good (Green).
-        // Let's assume trend-up is styled.
-
         trendEl.innerHTML = `
             <span class="trend-badge ${trendClass}">${arrow} ${Math.abs(percentChange).toFixed(1)}%</span>
-            <span class="trend-text">vs last month</span>
+            <span class="trend-text">this month vs last month</span>
         `;
 
-        // Render categories
         renderCategoriesData(categories, expenses);
-
-        // Render recent expenses
         renderRecentExpensesData(expenses, categories);
-
-        // Initialize chart with fetched expenses
         updateHomeChartWithData(expenses, 'weekly');
-
-        // Generate notifications based on expenses
         generateNotificationsFromExpenses(expenses, categories);
     } catch (e) {
         console.error('Home render error:', e);
@@ -522,7 +453,7 @@ async function openCategoryDetail(category) {
         // Fetch expenses for this category
         const expenses = await api.getExpenses({ categoryId: category._id });
 
-        // Calculate total for this category (client-side verification)
+        // Render logic for Category Detail
         const totalSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
         // This month expenses
@@ -533,9 +464,49 @@ async function openCategoryDetail(category) {
         });
         const monthTotal = thisMonthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-        utils.$('#category-total').innerHTML = `${utils.formatCurrency(totalSpent)} <span style="font-size: 0.6em; color: var(--color-text-secondary);">ETB</span>`;
-        utils.$('#category-month').innerHTML = `${utils.formatCurrency(monthTotal)} <span style="font-size: 0.6em; color: var(--color-text-secondary);">ETB</span>`;
+        // Update DOM
+        const totalEl = utils.$('#category-total');
+        const monthEl = utils.$('#category-month');
 
+        const totalHtml = `${utils.formatCurrency(totalSpent)} <span style="font-size: 0.6em; color: var(--color-text-secondary);">ETB</span>`;
+        const monthHtml = `${utils.formatCurrency(monthTotal)} <span style="font-size: 0.6em; color: var(--color-text-secondary);">ETB</span>`;
+
+        totalEl.innerHTML = totalHtml;
+        monthEl.innerHTML = monthHtml;
+
+        // Toggle Eyes
+        const eyeTotal = utils.$('#toggle-cat-total-eye');
+        const eyeMonth = utils.$('#toggle-cat-month-eye');
+
+        if (eyeTotal) {
+            eyeTotal.onclick = (e) => {
+                e.stopPropagation();
+                if (totalEl.dataset.hidden === 'true') {
+                    totalEl.innerHTML = totalHtml;
+                    totalEl.dataset.hidden = 'false';
+                    eyeTotal.textContent = '👁️';
+                } else {
+                    totalEl.textContent = '****';
+                    totalEl.dataset.hidden = 'true';
+                    eyeTotal.textContent = '👁️‍🗨️';
+                }
+            };
+        }
+
+        if (eyeMonth) {
+            eyeMonth.onclick = (e) => {
+                e.stopPropagation();
+                if (monthEl.dataset.hidden === 'true') {
+                    monthEl.innerHTML = monthHtml;
+                    monthEl.dataset.hidden = 'false';
+                    eyeMonth.textContent = '👁️';
+                } else {
+                    monthEl.textContent = '****';
+                    monthEl.dataset.hidden = 'true';
+                    eyeMonth.textContent = '👁️‍🗨️';
+                }
+            };
+        }
 
         // Render expenses table
         renderCategoryExpenses(expenses);
@@ -545,8 +516,8 @@ async function openCategoryDetail(category) {
 
         showPage('category');
 
-        // Back button handler
-        utils.$('#category-back').onclick = () => showPage('home');
+        // Back button handler uses History API now via showPage pushState
+        utils.$('#category-back').onclick = () => window.history.back();
     } catch (e) {
         utils.showToast('Failed to load category details', 'error');
     }
@@ -564,7 +535,7 @@ function renderCategoryExpenses(expenses) {
             dataId: expense._id,
             onClick: () => openEditExpense(expense)
         }, [
-            utils.createElement('td', { textContent: expense.dateEthiopian || utils.getRelativeDate(expense.date) }),
+            utils.createElement('td', { textContent: new Date(expense.date).toLocaleDateString() }),
             utils.createElement('td', { textContent: expense.reason }),
             utils.createElement('td', {
                 className: 'expense-amount',
@@ -2595,96 +2566,84 @@ function initApp() {
         document.documentElement.dataset.fontSize = savedUser.settings.fontSize || 'medium';
     }
 
-    // Check for token and biometric preference
-    const token = localStorage.getItem('token');
-    const enableBiometric = localStorage.getItem('enableBiometric') === 'true';
+    // Main App Init - Handles flow based on token but enforces manual login
+    async function initApp() {
+        // Always show login to satisfy "no automatic login" + "password needed every time"
+        showPage('login', false);
 
-    if (token && enableBiometric) {
-        // Auto-prompt biometric login after splash
-        setTimeout(() => {
-            handleBiometricLogin();
-        }, 1200);
-    } else if (token) {
-        // Token exists but biometric not enabled - still require login for security
-        showPage('login');
-        utils.showToast('Please login to continue', 'info');
-    } else {
-        // No token, show login
-        showPage('login');
-    }
-
-    // Network status listeners
-    utils.addNetworkListeners(
-        () => {
-            utils.showToast('You are back online!', 'success');
-            if (api.syncPendingExpenses) api.syncPendingExpenses().then(() => {
-                if (appState.currentPage === 'home') renderHome();
-            });
-        },
-        () => utils.showToast('You are offline. Changes will sync when online.', 'warning')
-    );
-
-    // Service Worker messages
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.addEventListener('message', async (event) => {
-            if (event.data.type === 'TRIGGER_SYNC') {
-                console.log('Background sync triggered from Service Worker');
-                if (api.syncPendingExpenses) {
-                    await api.syncPendingExpenses();
+        // Network status listeners
+        utils.addNetworkListeners(
+            () => {
+                utils.showToast('You are back online!', 'success');
+                // Use updated sync name
+                if (api.syncPendingData) api.syncPendingData().then(() => {
                     if (appState.currentPage === 'home') renderHome();
-                }
-            }
-        });
-    }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    initApp();
-
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/sw.js')
-                .then(registration => {
-                    console.log('ServiceWorker registration successful with scope: ', registration.scope);
-                }, err => {
-                    console.log('ServiceWorker registration failed: ', err);
                 });
-        });
+            },
+            () => utils.showToast('You are offline. Changes will sync when online.', 'warning')
+        );
+
+        // Service Worker messages
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.addEventListener('message', async (event) => {
+                if (event.data.type === 'TRIGGER_SYNC') {
+                    console.log('Background sync triggered from Service Worker');
+                    if (api.syncPendingData) {
+                        await api.syncPendingData();
+                        if (appState.currentPage === 'home') renderHome();
+                    }
+                }
+            });
+        }
     }
-});
 
-/* ===================================
-   PWA Install Promotion
-   =================================== */
-let deferredPrompt;
+    document.addEventListener('DOMContentLoaded', () => {
+        initApp();
 
-window.addEventListener('beforeinstallprompt', (e) => {
-    // Prevent the mini-infobar from appearing on mobile
-    e.preventDefault();
-    // Stash the event so it can be triggered later.
-    deferredPrompt = e;
-    // Show install button
-    showInstallButton();
-});
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful with scope: ', registration.scope);
+                    }, err => {
+                        console.log('ServiceWorker registration failed: ', err);
+                    });
+            });
+        }
+    });
 
-function showInstallButton() {
-    // Try to find a place in Settings
-    // We check if utility is available, otherwise waiting for DOM might be needed
-    // But since this event usually fires slightly after load, DOM should be ready or initApp renders it
+    /* ===================================
+       PWA Install Promotion
+       =================================== */
+    let deferredPrompt;
 
-    // We target the Settings page logout button container
-    // We perform a check to ensure we don't add duplicate buttons
-    if (document.getElementById('pwa-install-btn')) return;
+    window.addEventListener('beforeinstallprompt', (e) => {
+        // Prevent the mini-infobar from appearing on mobile
+        e.preventDefault();
+        // Stash the event so it can be triggered later.
+        deferredPrompt = e;
+        // Show install button
+        showInstallButton();
+    });
 
-    const logoutBtn = document.getElementById('logout-btn');
-    if (logoutBtn && deferredPrompt) {
-        const installBtn = document.createElement('button');
-        installBtn.id = 'pwa-install-btn';
-        installBtn.className = 'btn btn-primary btn-full';
-        installBtn.style.marginBottom = '16px';
-        installBtn.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Distinct Green
-        installBtn.innerHTML = `
+    function showInstallButton() {
+        // Try to find a place in Settings
+        // We check if utility is available, otherwise waiting for DOM might be needed
+        // But since this event usually fires slightly after load, DOM should be ready or initApp renders it
+
+        // We target the Settings page logout button container
+        // We perform a check to ensure we don't add duplicate buttons
+        if (document.getElementById('pwa-install-btn')) return;
+
+        const logoutBtn = document.getElementById('logout-btn');
+        if (logoutBtn && deferredPrompt) {
+            const installBtn = document.createElement('button');
+            installBtn.id = 'pwa-install-btn';
+            installBtn.className = 'btn btn-primary btn-full';
+            installBtn.style.marginBottom = '16px';
+            installBtn.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)'; // Distinct Green
+            installBtn.innerHTML = `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;margin-right:8px;vertical-align:middle;">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                 <polyline points="7 10 12 15 17 10"></polyline>
@@ -2693,17 +2652,17 @@ function showInstallButton() {
             Install App
         `;
 
-        installBtn.addEventListener('click', async () => {
-            if (!deferredPrompt) return;
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            console.log(`User response to the install prompt: ${outcome}`);
-            if (outcome === 'accepted') {
-                deferredPrompt = null;
-                installBtn.remove();
-            }
-        });
+            installBtn.addEventListener('click', async () => {
+                if (!deferredPrompt) return;
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                console.log(`User response to the install prompt: ${outcome}`);
+                if (outcome === 'accepted') {
+                    deferredPrompt = null;
+                    installBtn.remove();
+                }
+            });
 
-        logoutBtn.parentNode.insertBefore(installBtn, logoutBtn);
+            logoutBtn.parentNode.insertBefore(installBtn, logoutBtn);
+        }
     }
-}

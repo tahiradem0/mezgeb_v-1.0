@@ -3,9 +3,9 @@
    For offline capability and caching
    =================================== */
 
-const CACHE_NAME = 'expense-tracker-v6';
-const STATIC_CACHE = 'expense-tracker-static-v6';
-const DYNAMIC_CACHE = 'expense-tracker-dynamic-v6';
+const CACHE_NAME = 'expense-tracker-v7';
+const STATIC_CACHE = 'expense-tracker-static-v7';
+const DYNAMIC_CACHE = 'expense-tracker-dynamic-v7';
 
 // Assets to cache immediately on install
 const STATIC_ASSETS = [
@@ -17,6 +17,7 @@ const STATIC_ASSETS = [
     '/js/data.js',
     '/js/utils.js',
     '/js/chart.js',
+    '/js/api.js',
     '/js/app.js',
     '/js/i18n.js',
     '/manifest.json',
