@@ -280,11 +280,34 @@ function showToast(message, type = 'info', duration = 3000) {
 /**
  * Show modal
  */
-function showModal(modalId) {
-    const modal = $(`#${modalId}`);
-    if (modal) {
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
+function showModal(idOrElement) {
+    if (typeof idOrElement === 'string') {
+        // Handle existing modal by ID
+        const modal = $(`#${idOrElement}`);
+        if (modal) {
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+    } else if (idOrElement instanceof Element) {
+        // Handle dynamic content
+        let modal = $('#dynamic-modal');
+
+        // Create generic modal if not exists
+        if (!modal) {
+            modal = createElement('div', { className: 'modal hidden', id: 'dynamic-modal' }, [
+                createElement('div', { className: 'modal-backdrop', id: 'dynamic-modal-backdrop', onclick: () => hideModal('dynamic-modal') }),
+                createElement('div', { className: 'modal-content', id: 'dynamic-modal-content' })
+            ]);
+            document.body.appendChild(modal);
+        }
+
+        const container = modal.querySelector('#dynamic-modal-content');
+        if (container) {
+            container.innerHTML = ''; // Clear previous
+            container.appendChild(idOrElement);
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
     }
 }
 

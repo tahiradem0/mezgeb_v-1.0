@@ -279,13 +279,14 @@ ol {
    App Container
    =================================== */
 .app-container {
-    min-height: 100vh;
+    /* min-height: 100vh;
+    display: none;
     width: 100%;
     max-width: var(--max-width);
     margin: 0 auto;
     position: relative;
     background: var(--color-background);
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.1); */
 }
 
 @media (min-width: 481px) {
@@ -301,8 +302,7 @@ ol {
    Pages
    =================================== */
 .page {
-    min-height: 100vh;
-    padding-bottom: calc(var(--nav-height) + var(--spacing-xl));
+    background: var(--color-background);
 }
 
 .page-content {
@@ -1273,91 +1273,4 @@ ol {
 
 [data-theme="dark"] .language-dropdown:focus {
     box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
-}
-
-/* ===================================
-   Context Switcher & Swipe Animation
-   =================================== */
-.context-indicator-wrapper {
-    transition: opacity 0.3s ease;
-}
-
-.context-dot {
-    width: 8px;
-    height: 8px;
-    background: var(--color-border);
-    border-radius: 50%;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.context-dot.active {
-    background: var(--color-primary);
-    transform: scale(1.2);
-    width: 20px;
-    border-radius: 4px;
-}
-
-/* Animation Classes for Swipe */
-.slide-out-left {
-    animation: slideOutLeft 0.25s forwards ease-in;
-}
-
-.slide-in-right {
-    animation: slideInRight 0.25s forwards ease-out;
-}
-
-.slide-out-right {
-    animation: slideOutRight 0.25s forwards ease-in;
-}
-
-.slide-in-left {
-    animation: slideInLeft 0.25s forwards ease-out;
-}
-
-@keyframes slideOutLeft {
-    from {
-        transform: translateX(0);
-        opacity: 1;
-    }
-
-    to {
-        transform: translateX(-20px);
-        opacity: 0;
-    }
-}
-
-@keyframes slideInRight {
-    from {
-        transform: translateX(20px);
-        opacity: 0;
-    }
-
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
-}
-
-@keyframes slideOutRight {
-    from {
-        transform: translateX(0);
-        opacity: 1;
-    }
-
-    to {
-        transform: translateX(20px);
-        opacity: 0;
-    }
-}
-
-@keyframes slideInLeft {
-    from {
-        transform: translateX(-20px);
-        opacity: 0;
-    }
-
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
 }

@@ -8,7 +8,7 @@ const API_BASE_URL = window.location.hostname === 'localhost' || window.location
 
 // Initialize Dexie (IndexedDB)
 const db = new Dexie('MezgebDB');
-db.version(2).stores({
+db.version(3).stores({
     // Use _id as the primary key since it's unique from MongoDB or generated for pending
     expenses: '_id, categoryId, amount, reason, date, status, groupId',
     categories: '_id, name, icon'
@@ -34,6 +34,14 @@ const api = {
             });
 
             if (response.status === 204) return null;
+
+            if (response.status === 401) {
+                console.warn('Session expired or invalid. Logging out.');
+                localStorage.removeItem('token');
+                localStorage.removeItem('currentUser');
+                window.location.reload();
+                throw new Error('Please authenticate.');
+            }
 
             const data = await response.json();
 
@@ -121,6 +129,8 @@ const api = {
 
         // ...
         if (endpoint.startsWith('/categories')) return db.categories.toArray(); // Fallback
+
+        if (endpoint.startsWith('/groups')) return []; // Basic offline support for groups
 
         throw new Error('Offline: Action not supported.');
     },
@@ -261,7 +271,13 @@ const api = {
 
     // Expenses (existing)
     async getExpenses(filters = {}) {
-        const query = new URLSearchParams(filters).toString();
+        const cleanFilters = {};
+        for (const key in filters) {
+            if (filters[key] !== undefined && filters[key] !== null && filters[key] !== 'undefined') {
+                cleanFilters[key] = filters[key];
+            }
+        }
+        const query = new URLSearchParams(cleanFilters).toString();
         return this.request(`/expenses?${query}`);
     },
 

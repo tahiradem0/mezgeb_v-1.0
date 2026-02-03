@@ -12,15 +12,15 @@ router.get('/', auth, async (req, res) => {
         let query = {};
 
         // Shared vs Personal Context
-        if (groupId) {
+        if (groupId && groupId !== 'undefined' && groupId !== 'null') {
             // Verify group membership
-            const group = await Group.findOne({ _id: groupId, members: req.user.userId });
+            const group = await Group.findOne({ _id: groupId, members: req.user._id });
             if (!group) return res.status(403).json({ error: 'Access denied to this group' });
 
             query.groupId = groupId;
         } else {
             // Personal expenses only (groupId null or not set)
-            query.userId = req.user.userId;
+            query.userId = req.user._id;
             query.groupId = null;
         }
 
@@ -53,12 +53,12 @@ router.post('/', auth, async (req, res) => {
     try {
         const expenseData = {
             ...req.body,
-            userId: req.user.userId
+            userId: req.user._id
         };
 
         // If adding to a group, verify membership
         if (req.body.groupId) {
-            const group = await Group.findOne({ _id: req.body.groupId, members: req.user.userId });
+            const group = await Group.findOne({ _id: req.body.groupId, members: req.user._id });
             if (!group) return res.status(403).json({ error: 'Access denied to this group' });
             expenseData.groupId = req.body.groupId;
         }
@@ -71,6 +71,7 @@ router.post('/', auth, async (req, res) => {
 
         res.status(201).json(expense);
     } catch (e) {
+        console.error('Create Expense Error:', e);
         res.status(400).json({ error: e.message });
     }
 });

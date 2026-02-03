@@ -3,9 +3,9 @@
    For offline capability and caching
    =================================== */
 
-const CACHE_NAME = 'expense-tracker-v10';
-const STATIC_CACHE = 'expense-tracker-static-v10';
-const DYNAMIC_CACHE = 'expense-tracker-dynamic-v10';
+const CACHE_NAME = 'expense-tracker-v14';
+const STATIC_CACHE = 'expense-tracker-static-v14';
+const DYNAMIC_CACHE = 'expense-tracker-dynamic-v14';
 
 // Assets to cache immediately on install
 const STATIC_ASSETS = [

@@ -15,7 +15,7 @@ router.post('/create', auth, async (req, res) => {
         const group = new Group({
             name,
             connectionId,
-            members: [req.user.userId]
+            members: [req.user._id]
         });
 
         await group.save();
@@ -47,8 +47,8 @@ router.post('/join', auth, async (req, res) => {
         }
 
         // 3. Add current user if not already added
-        if (!group.members.includes(req.user.userId)) {
-            group.members.push(req.user.userId);
+        if (!group.members.includes(req.user._id.toString())) {
+            group.members.push(req.user._id);
             await group.save();
         }
 
@@ -61,7 +61,7 @@ router.post('/join', auth, async (req, res) => {
 // Get my groups
 router.get('/', auth, async (req, res) => {
     try {
-        const groups = await Group.find({ members: req.user.userId });
+        const groups = await Group.find({ members: req.user._id });
         res.json(groups);
     } catch (error) {
         res.status(500).json({ error: error.message });

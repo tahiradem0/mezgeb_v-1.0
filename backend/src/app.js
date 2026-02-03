@@ -26,8 +26,15 @@ app.get('/health', (req, res) => {
 });
 
 // 404 handler for API
-app.use((req, res) => {
-    res.status(404).json({ error: 'Route not found' });
+// Serve static files from frontend
+app.use(express.static(path.join(__dirname, '../../frontend')));
+
+// Handle SPA routing (return index.html for non-API routes)
+app.get('*', (req, res) => {
+    if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: 'Route not found' });
+    }
+    res.sendFile(path.join(__dirname, '../../frontend/index.html'));
 });
 
 module.exports = app;

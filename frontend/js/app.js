@@ -17,7 +17,11 @@ const appState = {
         amountMin: null,
         amountMax: null
     },
-    currentGroupId: null, // null = Personal
+    // Load context, handling "null" string bug
+    currentGroupId: (function () {
+        const saved = localStorage.getItem('currentGroupId');
+        return (saved && saved !== 'null' && saved !== 'undefined') ? saved : null;
+    })(),
     groups: [] // List of connected groups
 };
 
@@ -73,6 +77,13 @@ function initNavigation() {
 }
 
 function showPage(pageName, pushState = true) {
+    // Auth Guard
+    if (pageName !== 'login' && pageName !== 'register' && !appState.isLoggedIn) {
+        console.warn('Redirecting to login: Not authenticated');
+        pageName = 'login';
+        pushState = false;
+    }
+
     const pages = utils.$$('.page');
     const targetPage = utils.$(`#${pageName}-page`);
     const bottomNav = utils.$('#bottom-nav');
@@ -432,10 +443,33 @@ async function renderHome() {
 
 function renderCategoriesData(categories, expenses) {
     const container = utils.$('#categories-container');
-    // ... (rest is same, but enabling all categories for now or filtering)
-    const visibleCategories = categories.filter(cat => cat.isVisible);
+    // Show all categories if none are explicitly visible (handles new DB scenario)
+    let visibleCategories = categories.filter(cat => cat.isVisible);
+    if (visibleCategories.length === 0) {
+        visibleCategories = categories; // Fall back to all categories
+    }
 
     container.innerHTML = '';
+
+    // Empty State - No categories at all
+    if (categories.length === 0) {
+        const emptyCard = utils.createElement('div', {
+            className: 'category-card',
+            style: 'grid-column: span 2; text-align: center; padding: 30px;'
+        }, [
+            utils.createElement('p', {
+                textContent: 'No categories yet.',
+                style: 'margin-bottom: 10px; color: var(--color-text-secondary);'
+            }),
+            utils.createElement('button', {
+                className: 'btn btn-primary',
+                textContent: '+ Add Category',
+                onClick: () => showPage('settings')
+            })
+        ]);
+        container.appendChild(emptyCard);
+        return;
+    }
 
     visibleCategories.forEach(category => {
         // Calculate total for this category
@@ -462,6 +496,19 @@ function renderRecentExpensesData(expenses, categories) {
     const recentExpenses = utils.sortBy(expenses, 'date', 'desc').slice(0, 5);
 
     tbody.innerHTML = '';
+
+    // Empty State
+    if (recentExpenses.length === 0) {
+        const emptyRow = utils.createElement('tr', {}, [
+            utils.createElement('td', {
+                colSpan: 4,
+                textContent: 'No expenses yet. Tap + to add your first expense!',
+                style: 'text-align: center; padding: 20px; color: var(--color-text-secondary); font-style: italic;'
+            })
+        ]);
+        tbody.appendChild(emptyRow);
+        return;
+    }
 
     recentExpenses.forEach(expense => {
         const category = typeof expense.categoryId === 'object'
@@ -780,7 +827,8 @@ async function handleAddExpense() {
             reason,
             date: date.toISOString(),
             dateEthiopian: utils.toEthiopianDate(date),
-            groupId: appState.currentGroupId || undefined
+            // Ensure strictly undefined if null or invalid
+            groupId: (appState.currentGroupId && appState.currentGroupId !== 'null') ? appState.currentGroupId : undefined
         };
 
         await api.createExpense(expenseData);
@@ -2615,10 +2663,44 @@ function renderGroupsSettings() {
 
     listContainer.innerHTML = '';
 
+    // Always show the user's persistent connection ID first
+    let myConnectionId = localStorage.getItem('myConnectionId');
+    if (!myConnectionId) {
+        myConnectionId = 'CONN-' + Math.floor(1000 + Math.random() * 9000);
+        localStorage.setItem('myConnectionId', myConnectionId);
+    }
+
+    // My Connection ID Card
+    const myIdCard = utils.createElement('div', {
+        className: 'category-card',
+        style: 'padding: 12px; margin-bottom: 12px; background: var(--color-primary-gradient);'
+    }, [
+        utils.createElement('p', {
+            textContent: 'Your Connection ID',
+            style: 'margin: 0 0 4px 0; font-size: 0.7rem; opacity: 0.8; color: white;'
+        }),
+        utils.createElement('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
+            utils.createElement('span', {
+                textContent: myConnectionId,
+                style: 'font-size: 1rem; font-weight: bold; color: white; flex: 1;'
+            }),
+            utils.createElement('button', {
+                className: 'btn',
+                innerHTML: '📋',
+                style: 'padding: 6px 10px; background: rgba(255,255,255,0.2); color: white; border: none;',
+                onClick: () => {
+                    navigator.clipboard.writeText(myConnectionId);
+                    utils.showToast('ID copied!', 'success');
+                }
+            })
+        ])
+    ]);
+    listContainer.appendChild(myIdCard);
+
     if (!appState.groups || appState.groups.length === 0) {
-        listContainer.innerHTML = `
+        listContainer.innerHTML += `
             <div class="empty-state" style="padding: 10px; text-align: left;">
-                <p style="font-size: 0.8rem;">No shared connections yet.</p>
+                <p style="font-size: 0.8rem;">No shared connections yet. Tap below to connect.</p>
             </div>
         `;
     } else {
@@ -2648,7 +2730,7 @@ function showConnectGroupModal() {
     const content = utils.createElement('div', { style: 'padding-bottom: 20px;' }, [
         utils.createElement('div', { className: 'modal-header' }, [
             utils.createElement('h3', { textContent: 'Connect Partner' }),
-            utils.createElement('button', { className: 'modal-close', textContent: '×', onClick: () => utils.closeModal() })
+            utils.createElement('button', { className: 'modal-close', textContent: '×', onClick: () => utils.hideModal('dynamic-modal') })
         ]),
         utils.createElement('div', { className: 'tabs', style: 'display: flex; gap: 10px; margin-bottom: 20px;' }, [
             utils.createElement('button', {
@@ -2712,7 +2794,7 @@ function renderJoinForm() {
             utils.showToast('Connected successfully!', 'success');
             await initGroups();
             renderGroupsSettings();
-            utils.closeModal();
+            utils.hideModal('dynamic-modal');
         } catch (e) {
             utils.showToast(e.message, 'error');
             submitBtn.textContent = 'Connect';
@@ -2726,12 +2808,44 @@ function renderCreateForm() {
     const container = utils.$('#modal-form-container');
     container.innerHTML = '';
 
-    const randomId = 'CONN-' + Math.floor(1000 + Math.random() * 9000);
+    // Get or create persistent connection ID for this user
+    let connectionId = localStorage.getItem('myConnectionId');
+    if (!connectionId) {
+        connectionId = 'CONN-' + Math.floor(1000 + Math.random() * 9000);
+        localStorage.setItem('myConnectionId', connectionId);
+    }
 
     container.appendChild(utils.createElement('p', { textContent: 'Create a shared space. Share this ID with your partner.', style: 'font-size: 0.8rem; margin-bottom: 15px; opacity: 0.7;' }));
 
     const nameInput = utils.createElement('input', { type: 'text', placeholder: 'Group Name (e.g., Home, Business)', className: 'date-input', style: 'width: 100%; margin-bottom: 10px;' });
-    const idInput = utils.createElement('input', { type: 'text', value: randomId, readOnly: true, className: 'date-input', style: 'width: 100%; margin-bottom: 20px; background: var(--color-surface-elevated);' });
+
+    // ID display row with regenerate button
+    const idRow = utils.createElement('div', { style: 'display: flex; gap: 8px; margin-bottom: 10px;' });
+    const idInput = utils.createElement('input', { type: 'text', value: connectionId, readOnly: true, className: 'date-input', style: 'flex: 1; background: var(--color-surface-elevated);' });
+    const regenerateBtn = utils.createElement('button', {
+        className: 'btn btn-outline',
+        innerHTML: '🔄',
+        title: 'Generate New ID',
+        style: 'padding: 10px 14px;',
+        onClick: () => {
+            const newId = 'CONN-' + Math.floor(1000 + Math.random() * 9000);
+            localStorage.setItem('myConnectionId', newId);
+            idInput.value = newId;
+            utils.showToast('New ID generated!', 'success');
+        }
+    });
+    idRow.append(idInput, regenerateBtn);
+
+    // Copy button
+    const copyBtn = utils.createElement('button', {
+        className: 'btn btn-outline btn-full',
+        textContent: '📋 Copy Connection ID',
+        style: 'margin-bottom: 20px;',
+        onClick: () => {
+            navigator.clipboard.writeText(idInput.value);
+            utils.showToast('Copied to clipboard!', 'success');
+        }
+    });
 
     const submitBtn = utils.createElement('button', { className: 'btn btn-primary btn-full', textContent: 'Create Connection' });
 
@@ -2742,18 +2856,18 @@ function renderCreateForm() {
         try {
             submitBtn.textContent = 'Creating...';
             if (typeof api.createGroup !== 'function') throw new Error('API Create function missing');
-            await api.createGroup({ name, connectionId: randomId });
-            utils.showToast('Group created!', 'success');
+            await api.createGroup({ name, connectionId: idInput.value });
+            utils.showToast('Group created! Share the ID with your partner.', 'success');
             await initGroups();
             renderGroupsSettings();
-            utils.closeModal();
+            utils.hideModal('dynamic-modal');
         } catch (e) {
             utils.showToast(e.message, 'error');
             submitBtn.textContent = 'Create Connection';
         }
     };
 
-    container.append(nameInput, idInput, submitBtn);
+    container.append(nameInput, idRow, copyBtn, submitBtn);
 }
 
 // Global Swipe State
@@ -2805,6 +2919,12 @@ function switchContext(direction) {
         setTimeout(async () => {
             // Update State
             appState.currentGroupId = allContexts[nextIndex];
+            // Persist Choice
+            if (appState.currentGroupId) {
+                localStorage.setItem('currentGroupId', appState.currentGroupId);
+            } else {
+                localStorage.removeItem('currentGroupId');
+            }
 
             // Update UI
             updateHomeContextUI();
